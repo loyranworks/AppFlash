@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { english, setLanguage, t, message, errorMessage, translatePage } from './i18n.js';
-import { selectSection } from './navigation.js';
+import { selectSection, initializeNavigation } from './navigation.js';
 
 test('all static settings text has English translations', () => {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
@@ -30,14 +30,24 @@ test('language switches retranslate status and clear stale error metadata', () =
 });
 
 test('sidebar changes only visibility and preserves edits', () => {
-  const panels = ['apps', 'shortcuts', 'hint', 'general'].map(panel => ({ dataset: { panel }, hidden: false, value: 'unsaved' }));
-  const buttons = panels.map(panel => ({ dataset: { section: panel.dataset.panel }, setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; } }));
+  const panels = ['general', 'apps', 'hint'].map(panel => ({ dataset: { panel }, hidden: false, value: 'unsaved' }));
+  const buttons = panels.map(panel => ({ dataset: { section: panel.dataset.panel }, setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; }, addEventListener() {} }));
   const title = { dataset: {} }; const description = { dataset: {} };
   const root = { querySelectorAll: selector => selector === '[data-panel]' ? panels : buttons, getElementById: id => id === 'page-title' ? title : description };
-  selectSection(root, 'general');
-  assert.deepEqual(panels.map(panel => panel.hidden), [true, true, true, false]);
-  assert.equal(buttons[3]['aria-current'], 'page');
+  initializeNavigation(root);
+  assert.deepEqual(panels.map(panel => panel.hidden), [false, true, true]);
+  assert.equal(buttons[0]['aria-current'], 'page');
   selectSection(root, 'invalid');
-  assert.equal(panels[3].hidden, false);
+  assert.equal(panels[0].hidden, false);
   assert.ok(panels.every(panel => panel.value === 'unsaved'));
+});
+
+test('General comes first and Prefix controls share the application panel', () => {
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  assert.equal([...html.matchAll(/data-section="([^"]+)"/g)][0][1], 'general');
+  const apps = html.slice(html.indexOf('id="panel-apps"'), html.indexOf('id="panel-hint"'));
+  assert.match(apps, /id="prefix-options"/);
+  assert.match(apps, /id="app-list"/);
+  assert.doesNotMatch(html, /data-panel="shortcuts"/);
+  assert.match(html, /界面语言 \/ Language/);
 });

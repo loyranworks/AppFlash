@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-changed=icons/icon.ico");
+    println!("cargo:rerun-if-changed=icons/icon.png");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         let output =
             std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("app-flash-native");

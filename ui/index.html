@@ -3,28 +3,25 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AppFlash</title><link rel="stylesheet" href="settings.css"><script type="module" src="settings.js"></script></head>
 <body><div class="settings-shell">
 <aside class="sidebar">
-  <header class="brand"><img src="app-icon.svg" alt="AppFlash"><h1>AppFlash</h1></header>
+  <header class="brand"><span class="brand-mark" role="img" aria-label="AppFlash"></span><h1>AppFlash</h1></header>
   <p class="slogan" data-i18n="你的应用，一闪即达。">你的应用，一闪即达。</p>
   <nav data-i18n-label="设置导航" aria-label="设置导航">
-    <button type="button" data-section="apps" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M5 12h14M12 5v14"/></svg><span data-i18n="应用">应用</span></button>
-    <button type="button" data-section="shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 16h14M9 5v14M15 5v14"/></svg><span data-i18n="快捷键">快捷键</span></button>
+    <button type="button" data-section="general" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 17h14"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span data-i18n="通用">通用</span></button>
+    <button type="button" data-section="apps"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M5 12h14M12 5v14"/></svg><span data-i18n="应用">应用</span></button>
     <button type="button" data-section="hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 4v16M9 8h9M9 16h9"/><circle cx="6" cy="8" r="2"/><circle cx="6" cy="16" r="2"/></svg><span data-i18n="贴边提示">贴边提示</span></button>
-    <button type="button" data-section="general"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 17h14"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span data-i18n="通用">通用</span></button>
   </nav>
   <div class="sidebar-tail"><span class="sidebar-line"></span><span>APP / FLASH</span></div>
 </aside>
 <main>
-  <header class="page-heading"><div><h2 id="page-title" data-i18n="应用">应用</h2><p id="page-description" data-i18n="管理应用与字母绑定">管理应用与字母绑定</p></div><button id="pause" class="quiet" data-i18n="暂停切换">暂停切换</button></header>
+  <header class="page-heading"><div><h2 id="page-title" data-i18n="通用">通用</h2><p id="page-description" data-i18n="语言、登录启动与版本更新">语言、登录启动与版本更新</p></div><button id="pause" class="quiet" data-i18n="暂停切换">暂停切换</button></header>
   <div class="panel-content">
-    <section id="panel-apps" data-panel="apps">
+    <section id="panel-apps" data-panel="apps" hidden>
+      <div class="prefix-card"><div><h2 data-i18n="全局 Prefix">全局 Prefix</h2><p data-i18n="按住，再敲应用对应字母">按住，再敲应用对应字母</p></div><div id="prefix-options" class="prefix-options"><label><input type="checkbox" value="Control">Ctrl</label><label><input type="checkbox" value="Alt">Alt</label><label><input type="checkbox" value="Shift">Shift</label><label><input type="checkbox" value="Super"><span id="super-name">Win</span></label></div></div>
+      <p id="shortcut-warning" class="warning"></p>
       <div class="list-heading"><h2><span data-i18n="应用">应用</span> <span id="app-count">0</span></h2><div><button id="add" data-i18n="＋ 添加">＋ 添加</button><button id="import" data-i18n="批量导入">批量导入</button></div></div>
       <div class="column-head"><span data-i18n="应用 / 地址">应用 / 地址</span><span data-i18n="字母">字母</span><span data-i18n="顺序">顺序</span><span></span></div>
       <div id="app-list" class="app-list" tabindex="0" data-i18n-label="应用列表，可滚动" aria-label="应用列表，可滚动"></div>
       <p class="footnote" data-i18n="用列表中的 ↑ ↓ 调整手动顺序，保存后生效。留空字母可暂时停用条目。">用列表中的 ↑ ↓ 调整手动顺序，保存后生效。留空字母可暂时停用条目。</p>
-    </section>
-    <section id="panel-shortcuts" data-panel="shortcuts" hidden>
-      <div class="prefix-card"><div><h2 data-i18n="全局 Prefix">全局 Prefix</h2><p data-i18n="按住，再敲应用对应字母">按住，再敲应用对应字母</p></div><div id="prefix-options" class="prefix-options"><label><input type="checkbox" value="Control">Ctrl</label><label><input type="checkbox" value="Alt">Alt</label><label><input type="checkbox" value="Shift">Shift</label><label><input type="checkbox" value="Super"><span id="super-name">Win</span></label></div></div>
-      <p id="shortcut-warning" class="warning"></p>
     </section>
     <section id="panel-hint" data-panel="hint" hidden>
       <div class="hint-heading"><div><h2 data-i18n="贴边提示">贴边提示</h2><p data-i18n="不影响快速切换；松开 Prefix 即隐藏">不影响快速切换；松开 Prefix 即隐藏</p></div><label class="switch"><input id="hint-enabled" type="checkbox" data-i18n-label="启用贴边提示" aria-label="启用贴边提示"><span></span></label></div>
@@ -33,8 +30,8 @@
       <div class="option-row"><label for="hint-order" data-i18n="显示顺序">显示顺序</label><select id="hint-order"><option value="manual" data-i18n="手动顺序 · 按应用列表">手动顺序 · 按应用列表</option><option value="alphabetical" data-i18n="字母顺序 · A–Z">字母顺序 · A–Z</option></select></div>
       <div class="option-row"><label for="letter-color" data-i18n="字母背景色">字母背景色</label><div class="color-option"><input id="letter-color" type="color"><output id="color-value"></output><button id="reset-color" class="quiet" data-i18n="默认">默认</button></div></div>
     </section>
-    <section id="panel-general" data-panel="general" hidden>
-      <div class="option-row"><label for="language" data-i18n="界面语言">界面语言</label><select id="language" disabled><option value="zh-CN" data-i18n="简体中文">简体中文</option><option value="en" data-i18n="英语">英语</option></select></div>
+    <section id="panel-general" data-panel="general">
+      <div class="option-row"><label for="language" data-i18n="界面语言 / Language">界面语言 / Language</label><select id="language" disabled><option value="zh-CN" data-i18n="简体中文">简体中文</option><option value="en">English</option></select></div>
       <p id="language-status" class="footnote" role="status" data-i18n="语言立即生效并保存，不影响其他未保存的修改。">语言立即生效并保存，不影响其他未保存的修改。</p>
       <section class="general-group"><div class="hint-heading"><div><h2 data-i18n="开机启动">开机启动</h2><p data-i18n="登录系统后静默驻留托盘 / 菜单栏，不弹出设置">登录系统后静默驻留托盘 / 菜单栏，不弹出设置</p></div><label class="switch"><input id="autostart" type="checkbox" disabled data-i18n-label="开机启动" aria-label="开机启动"><span></span></label></div><p id="autostart-status" class="footnote" role="status"></p><p class="footnote" data-i18n="此开关立即生效，无需点击保存。">此开关立即生效，无需点击保存。</p></section>
       <section class="general-group"><div class="list-heading"><h2 data-i18n="版本更新">版本更新</h2><div><button id="check-update" data-i18n="检查更新">检查更新</button><button id="install-update" class="primary" hidden data-i18n="下载并升级">下载并升级</button></div></div><p id="app-version" class="footnote"></p><p id="update-status" class="footnote" role="status" data-i18n="启动后自动检查，每 6 小时检查一次。">启动后自动检查，每 6 小时检查一次。</p></section>

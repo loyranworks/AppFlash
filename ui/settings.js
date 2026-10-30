@@ -19,8 +19,9 @@ function prefix() { return [...document.querySelectorAll('#prefix-options input:
 
 function updateTheme() {
   document.documentElement.style.setProperty('--accent', byId('letter-color').value);
+  document.documentElement.style.setProperty('--brand-color', state.paused ? '#343840' : byId('letter-color').value);
   byId('color-value').textContent = byId('letter-color').value;
-  for (const id of ['hint-delay', 'hint-order', 'letter-color', 'reset-color']) byId(id).disabled = !byId('hint-enabled').checked;
+  for (const id of ['hint-delay', 'hint-order']) byId(id).disabled = !byId('hint-enabled').checked;
   for (const input of document.querySelectorAll('input[name=side]')) input.disabled = !byId('hint-enabled').checked;
   byId('shortcut-warning').textContent = shortcutWarnings(prefix(), state.platform).join(' ');
 }
@@ -192,7 +193,7 @@ byId('cancel-confirm').addEventListener('click', () => { pendingSave = undefined
 byId('accept-confirm').addEventListener('click', () => { const config = pendingSave; pendingSave = undefined; byId('confirm-dialog').close(); if (config) save(config); });
 byId('pause').addEventListener('click', async () => {
   byId('pause').disabled = true;
-  try { const next = await invoke('set_paused', { paused: !state.paused }); state.paused = next.paused; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '快捷切换已恢复'); }
+  try { const next = await invoke('set_paused', { paused: !state.paused }); state.paused = next.paused; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme(); if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '快捷切换已恢复'); }
   catch (error) { showError(error); }
   finally { byId('pause').disabled = false; }
 });
@@ -238,7 +239,7 @@ try {
   await window.__TAURI__.event.listen('app-error', event => showError(event.payload));
   await window.__TAURI__.event.listen('paused-changed', event => {
     if (!state) return;
-    state.paused = event.payload; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换');
+    state.paused = event.payload; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme();
   });
   state = await invoke('get_state'); renderState(); byId('language').disabled = false;
   await initializeUpdates({ invoke, listen: window.__TAURI__.event.listen, hasUnsavedChanges: () => dirty, version: await window.__TAURI__.app.getVersion() });

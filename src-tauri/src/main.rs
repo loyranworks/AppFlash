@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod bindings;
 mod config;
+mod icon;
 mod platform;
 mod runtime;
 mod switching;
@@ -103,6 +104,27 @@ fn refresh_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         }))?;
     }
     Ok(())
+}
+
+fn refresh_icon(app: &tauri::AppHandle) {
+    let runtime = app.state::<Arc<runtime::Runtime>>();
+    let data = runtime.data.lock().unwrap();
+    let image = icon::image(&data.config.hint.color, data.paused);
+    drop(data);
+    let result: Result<(), String> = (|| {
+        let image = image?;
+        if let Some(tray) = app.tray_by_id("main") {
+            tray.set_icon(Some(image.clone()))
+                .map_err(|error| error.to_string())?;
+        }
+        if let Some(window) = app.get_webview_window("settings") {
+            window.set_icon(image).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = app.emit("app-error", error);
+    }
 }
 
 #[tauri::command]
@@ -227,6 +249,7 @@ fn main() {
                 })
                 .build(app)?;
             refresh_tray(app.handle())?;
+            refresh_icon(app.handle());
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             if std::env::args().any(|argument| argument == "--background") {

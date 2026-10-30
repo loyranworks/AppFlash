@@ -112,6 +112,7 @@ pub fn save(app: &AppHandle, config: Config) -> Result<Status, String> {
     runtime.changing.store(false, Ordering::SeqCst);
     result?;
     let _ = app.emit("config-changed", &config);
+    crate::refresh_icon(app);
     Ok(status(&runtime))
 }
 
@@ -142,6 +143,7 @@ pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
         let _ = window.hide();
     }
     let _ = app.emit("paused-changed", paused);
+    crate::refresh_icon(app);
     Ok(status(&runtime))
 }
 

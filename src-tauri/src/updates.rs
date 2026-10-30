@@ -25,7 +25,12 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
         .map_err(|error| error.to_string())?
         .check()
         .await
-        .map_err(|error| format!("检查更新失败：{error}"))?;
+        .map_err(|error| match error {
+            tauri_plugin_updater::Error::ReleaseNotFound => {
+                "尚未发布可用版本，或更新清单暂不可用。".into()
+            }
+            error => format!("检查更新失败：{error}"),
+        })?;
     let info = update.as_mut().map(|update| {
         update.timeout = Some(Duration::from_secs(300));
         UpdateInfo {

@@ -6,12 +6,12 @@ English · [简体中文](README.md)
 
 A focused Windows / macOS application switcher. Hold your chosen prefix and press one letter to launch, restore, cycle through or minimize an app. No search box, no unrelated features.
 
-> In development: Windows builds are available locally; macOS still needs on-device verification. We will keep the same royluo2026/AppFlash repository private until debugging is complete, then make it public. No stable release or working public update feed is promised yet.
+> In development: Windows builds are available locally; macOS still needs on-device verification. The same royluo2026/AppFlash repository is public. Signed updates are being tested through official Releases; this is not yet a stable release.
 
 ## Get started
 
 1. Open AppFlash. No application bindings are preconfigured.
-2. Select **Shortcuts** and choose a prefix, for example **Ctrl + Alt**. Multiple checked modifiers must be held together.
+2. Select **Applications** and choose a prefix, for example **Ctrl + Alt**. Multiple checked modifiers must be held together.
 3. Open **Applications**, import or add apps, and assign unique letters A–Z.
 4. Click **Save & apply**, close Settings, and press your shortcut. For Chrome assigned C, use **Ctrl + Alt + C**.
 
@@ -56,6 +56,8 @@ Choose enable / disable, delay (0–10 seconds), left / right edge, letter backg
 
 ## General settings
 
+The app mark uses the original lightning cutout in a rounded square. Its Settings preview follows the selected letter background color; saving updates the tray and window icon. Pausing switches the runtime mark to gray (#343840); resuming restores the saved color. Color remains editable when the edge hint is disabled. Installer, executable-file and macOS Dock icons use the static default color.
+
 - **Interface language:** Simplified Chinese or English. Changes immediately update and save Settings, dialogs, status text and tray menus without discarding other edits. App names, paths, original release notes and third-party system errors are not forcibly translated.
 - **Launch at login:** Off by default. Changes take effect immediately without Save. Starts quietly with Settings closed. Use a fixed installation path; moving a development exe requires reconfiguring the startup entry.
 - **Updates:** Checked about three seconds after launch and every six hours, or manually. Installation requires confirmation and verifies the signature and signed version. Unsaved edits block updating. Saved settings are backed up to config.pre-update.json; failed backup or verification cancels installation.
@@ -84,7 +86,7 @@ ui/ contains framework-free Settings and hint UI. src-tauri/src/ contains config
 
 ## Open source and contributing
 
-The same repository will become public after debugging, retaining its existing MIT License. This project has its own Git repository, independent of its parent. Exclude private configuration, paths, credentials and signing keys from code and history before publication.
+The same repository is public, retaining its existing MIT License. This project has its own Git repository, independent of its parent. Exclude private configuration, paths, credentials and signing keys from code and history before publication.
 
 Use a lightweight GitHub Flow: main is the integration branch; short-lived feat/name and fix/name branches are reviewed and verified through pull requests, then merged and deleted. No long-lived develop branch is needed yet. Release tags use v followed by the version number and must point to a verified commit.
 

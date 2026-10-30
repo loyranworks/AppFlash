@@ -3,7 +3,6 @@ import { message } from './i18n.js';
 export function selectSection(root, section) {
   const sections = {
     apps: ['应用', '管理应用与字母绑定'],
-    shortcuts: ['快捷键', '一个 Prefix，直达常用应用'],
     hint: ['贴边提示', '需要时出现，不打断你的工作'],
     general: ['通用', '语言、登录启动与版本更新'],
   };
@@ -19,5 +18,5 @@ export function selectSection(root, section) {
 
 export function initializeNavigation(root = document) {
   for (const button of root.querySelectorAll('[data-section]')) button.addEventListener('click', () => selectSection(root, button.dataset.section));
-  selectSection(root, 'apps');
+  selectSection(root, 'general');
 }

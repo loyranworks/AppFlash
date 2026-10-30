@@ -1,4 +1,6 @@
 export const english = {
+  '界面语言 / Language': '界面语言 / Language',
+  '尚未发布可用版本，或更新清单暂不可用。': 'No published release is available, or the update manifest is temporarily unavailable.',
   '你的应用，一闪即达。': 'Your apps, in a flash.',
   '设置导航': 'Settings navigation', '应用': 'Applications', '快捷键': 'Shortcuts', '贴边提示': 'Edge hint', '通用': 'General',
   '管理应用与字母绑定': 'Manage applications and letter bindings', '一个 Prefix，直达常用应用': 'One prefix for your everyday apps',
@@ -17,7 +19,7 @@ export const english = {
   '用列表中的 ↑ ↓ 调整手动顺序，保存后生效。留空字母可暂时停用条目。': 'Use ↑ ↓ to adjust manual order, then save. Leave a letter blank to disable an entry.',
   '关闭此窗口后在托盘 / 菜单栏继续运行。设置处于前台时暂不执行切换，避免编辑误触。': 'Closing Settings keeps AppFlash in the tray / menu bar. Switching is suspended while Settings is focused.',
   '授权 macOS 辅助功能': 'Grant macOS Accessibility access', '配置位置': 'Configuration location',
-  '界面语言': 'Interface language', '简体中文': 'Simplified Chinese', '英语': 'English',
+  '界面语言 / Language': '界面语言 / Language', '界面语言': 'Interface language', '简体中文': 'Simplified Chinese', '英语': 'English',
   '语言立即生效并保存，不影响其他未保存的修改。': 'Language changes are saved immediately without discarding other edits.',
   '编辑应用': 'Edit application', '添加应用': 'Add application', '应用名称': 'Application name', '应用完整地址': 'Full application path',
   '绑定字母': 'Assigned letter', '相同名称、不同地址可以分别添加。': 'Applications with the same name but different paths are separate entries.',
@@ -56,6 +58,7 @@ export const english = {
 };
 
 const nativeErrors = {
+  '尚未发布可用版本，或更新清单暂不可用。': 'No published release is available, or the update manifest is temporarily unavailable.',
   '不支持此配置版本；原文件未修改': 'Unsupported configuration version; original file unchanged',
   '语言必须是 zh-CN 或 en': 'Language must be zh-CN or en',
   'Prefix 必须是 Control / Alt / Shift / Super 的非空组合': 'Prefix must be a nonempty combination of Control / Alt / Shift / Super',
