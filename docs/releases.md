@@ -1,12 +1,12 @@
 # 发布与升级
 
-源码已推送到私有仓库的 main。当前 gh OAuth 授权缺少 workflow scope，不能上传 Actions 工作流。模板保存在 docs/release-workflow.yml；本地 .github/workflows/release.yml 仍保留。通过 gh auth refresh -h github.com -s workflow 补充授权后，将模板提交到 .github/workflows/release.yml 才能启用自动发布。目前远端没有启用发布工作流。
+GitHub CLI 已取得 workflow 授权，正式工作流位于 .github/workflows/release.yml，仅推送 v* 标签才触发发布。普通 main 提交不发布安装包。尚未配置更新签名 Secret，也未执行线上发布验收。
 
-远端：`https://github.com/royluo2026/AppFlash.git`。HTTPS 读取与 `gh repo clone royluo2026/AppFlash` 已成功，当前 `gh` 账号为 royluo2026，仓库权限 ADMIN。本次只克隆到临时目录核对，没有修改父目录 Git 仓库的 remote，也没有自动提交或推送。
+远端：`https://github.com/royluo2026/AppFlash.git`。源码与双语 README 已提交并通过 HTTPS 推送；项目使用独立 Git 仓库，不修改父目录仓库 remote。仓库继续保持私有。
 
 ## 一次性准备
 
-1. 把本工作区作为 AppFlash 仓库上传。可使用已验证的 HTTPS / gh 登录；SSH 密钥与连接器授权仍不可用，不必因此修改仓库可见性。远端目前只有初始 LICENSE，没有 Release。本目录尚未初始化独立 Git 仓库，父目录已有 Git 仓库，避免误改父仓库 remote。
+1. 源码与工作流已准备。使用 HTTPS / gh 登录推送即可；SSH 或连接器授权不是发布前提。发布前核对 main 的测试结果和版本，不要误改父目录仓库。
 2. **使用同一个 AppFlash 仓库，调试完成后再公开。** 调试阶段保持私有，不另建发布仓库。Release endpoint 不变；普通客户端在私有阶段无法匿名读取。公开前检查源码与历史中没有凭据、私钥和私人配置，再由维护者明确变更可见性并发布正式 Release。客户端不携带 GitHub Token。
 3. 更新签名私钥已生成在 `C:\Users\luoyi8\.tauri\app-flash.key`，不在项目内。请自行安全备份，再将文件内容填入仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`；如密钥有密码，配置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。客户端仅包含匹配的公钥。不要将私钥提交到 Git，也不要更换公钥导致已安装客户端失去更新能力。
 4. 开启 GitHub Actions。首次发布仍需用户下载并安装安装包，开发目录的裸 exe 不作为正式便携版更新支持。
