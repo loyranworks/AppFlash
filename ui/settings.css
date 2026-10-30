@@ -7,7 +7,11 @@
 .sidebar nav{display:grid;gap:8px}.sidebar nav button{display:flex;align-items:center;gap:10px;border:0;border-radius:8px;background:transparent;padding:11px 10px;text-align:left;position:relative}
 .sidebar nav button[aria-current=page]{color:var(--accent);background:#f6f8f9}.sidebar nav button[aria-current=page]:before{content:'';position:absolute;left:-18px;top:12px;bottom:12px;width:2px;background:var(--accent);border-radius:2px}
 .sidebar svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
-.sidebar-tail{margin-top:auto;font-size:8px;letter-spacing:2px;color:#9ba9b1;display:flex;align-items:center;gap:8px}.sidebar-line{height:1px;width:24px;background:#b8c7d0}
+.sidebar-tail{margin-top:auto;padding-top:24px;font-size:8px;letter-spacing:2px;color:#9ba9b1}.sidebar-signature{display:flex;align-items:center;gap:8px}.sidebar-line{height:1px;width:24px;background:#b8c7d0}
+@font-face{font-family:'Studio Playfair';src:url('fonts/playfair-display-studio.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'Studio Noto Serif';src:url('fonts/noto-serif-sc-studio.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+.studio-signature{margin-top:18px;letter-spacing:0}.studio-name{font-family:'Studio Noto Serif',serif;font-size:15px;font-weight:400;letter-spacing:1px;color:#244b70;margin:0;line-height:1.6}.studio-motto{font-size:10px;line-height:1.8;color:#526a7d;margin:5px 0 0;text-wrap:pretty}
+:lang(en) .studio-name{font-family:'Studio Playfair',serif;font-size:17px;letter-spacing:-.25px}
 .settings-shell main{min-width:0;max-width:none;margin:0;padding:30px 26px 18px;display:flex;flex-direction:column;overflow:hidden}
 .page-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}.page-heading h2{font-size:21px;font-weight:550;letter-spacing:-.4px}.page-heading p{font-size:11px;color:#95a2ab;margin:6px 0 0}
 .panel-content{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#c7d2d8 transparent}

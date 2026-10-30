@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
+test('settings refresh updates the separately owned Windows taskbar icon', () => {
+  const source = readFileSync(new URL('../src-tauri/src/main.rs', import.meta.url), 'utf8');
+  assert.match(source, /app\.manage\(icon::TaskbarIcon::default\(\)\)/);
+  assert.match(source, /app\.run_on_main_thread\(move \|\|/);
+  assert.match(source, /state::<icon::TaskbarIcon>\(\)[\s\S]*?\.set\(handle\.0 as _, &image\)/);
+});
+
 test('brand previews selected color, pauses in gray and restores without altering accent', () => {
   const source = readFileSync(new URL('./settings.js', import.meta.url), 'utf8');
   const start = source.indexOf('function updateTheme()');

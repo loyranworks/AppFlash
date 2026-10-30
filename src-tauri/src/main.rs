@@ -55,7 +55,7 @@ fn set_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
 }
 
 fn refresh_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem};
     let english = app
         .state::<Arc<runtime::Runtime>>()
         .data
@@ -94,7 +94,27 @@ fn refresh_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&settings, &pause, &separator, &quit])?;
+    let studio = if english {
+        "loyran works.\nMake Ideas Work Beautifully"
+    } else {
+        "落雁工作室\n巧思成形，琢而至美。"
+    };
+    let about = PredefinedMenuItem::about(
+        app,
+        Some(if english {
+            "About AppFlash"
+        } else {
+            "关于 AppFlash"
+        }),
+        Some(AboutMetadata {
+            name: Some("AppFlash".into()),
+            version: Some(app.package_info().version.to_string()),
+            comments: Some(studio.into()),
+            credits: Some(studio.into()),
+            ..Default::default()
+        }),
+    )?;
+    let menu = Menu::with_items(app, &[&settings, &pause, &separator, &about, &quit])?;
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu))?;
         tray.set_tooltip(Some(if english {
@@ -118,7 +138,24 @@ fn refresh_icon(app: &tauri::AppHandle) {
                 .map_err(|error| error.to_string())?;
         }
         if let Some(window) = app.get_webview_window("settings") {
-            window.set_icon(image).map_err(|error| error.to_string())?;
+            window
+                .set_icon(image.clone())
+                .map_err(|error| error.to_string())?;
+            #[cfg(target_os = "windows")]
+            app.run_on_main_thread(move || {
+                let result = window
+                    .hwnd()
+                    .map_err(|error| error.to_string())
+                    .and_then(|handle| {
+                        window
+                            .state::<icon::TaskbarIcon>()
+                            .set(handle.0 as _, &image)
+                    });
+                if let Err(error) = result {
+                    let _ = window.emit("app-error", error);
+                }
+            })
+            .map_err(|error| error.to_string())?;
         }
         Ok(())
     })();
@@ -207,6 +244,8 @@ fn main() {
             updates::install_update
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            app.manage(icon::TaskbarIcon::default());
             runtime::start(app.handle())?;
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
             TrayIconBuilder::with_id("main")

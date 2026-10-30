@@ -1,4 +1,6 @@
 export const english = {
+  '落雁工作室': 'loyran works.',
+  '巧思成形，琢而至美。': 'Make Ideas Work Beautifully',
   '界面语言 / Language': '界面语言 / Language',
   '尚未发布可用版本，或更新清单暂不可用。': 'No published release is available, or the update manifest is temporarily unavailable.',
   '你的应用，一闪即达。': 'Your apps, in a flash.',
