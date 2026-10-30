@@ -6,7 +6,7 @@ GitHub CLI 已取得 workflow 授权，正式工作流位于 .github/workflows/r
 
 ## 仓库迁移（2026-10-30）
 
-当前仓库为 loyranworks/AppFlash，Git remote、客户端更新源和清单生成脚本已同步修改。0.1.1 的旧、新清单地址均已匿名验证 HTTP 200；旧地址仍依赖 GitHub 重定向，请勿在原地址新建同名仓库。签名公钥、应用标识和配置路径保持不变，升级不会迁移或清空用户配置。0.1.2 包含贴边显示顺序修正，但长按 Prefix 的实机效果仍需验收。
+当前仓库为 loyranworks/AppFlash，Git remote、客户端更新源和清单生成脚本已同步修改。0.1.1 的旧、新清单地址均已匿名验证 HTTP 200；旧地址仍依赖 GitHub 重定向，请勿在原地址新建同名仓库。签名公钥、应用标识和配置路径保持不变，升级不会迁移或清空用户配置。0.1.2 已在新仓库正式发布，包含贴边显示顺序修正。旧、新清单入口都返回 0.1.2，三平台包已匿名下载并通过原公钥签名及版本校验。长按 Prefix 的实机效果仍需验收。
 
 ## 一次性准备
 
@@ -19,7 +19,7 @@ GitHub CLI 已取得 workflow 授权，正式工作流位于 .github/workflows/r
 
 同步修改 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本，例如 `0.1.1`；相应更新 lock 文件。执行 `npm test` 和 `node tools/check-release.mjs`。自行提交，再推送对应 `v0.1.1` tag。
 
-`.github/workflows/release.yml` 构建 Windows x64 NSIS、Apple Silicon 和 Intel macOS 应用。先上传到草稿 Release，所有平台成功且 `latest.json` 包含三个平台的签名和地址后才正式发布。普通代码 push 不发布；不一致版本或缺失密钥会失败；失败构建不会将半完成版本推给客户端。
+`.github/workflows/release.yml` 构建 Windows x64 NSIS、Apple Silicon 和 Intel macOS 应用。先创建一个共享草稿，三个平台按同一 Release ID 上传，所有平台成功且 `latest.json` 包含三个平台的签名和地址后才正式发布。普通代码 push 不发布；不一致版本或缺失密钥会失败；失败构建不会将半完成版本推给客户端。
 
 Windows 本地构建签名安装包：
 
