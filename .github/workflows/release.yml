@@ -72,5 +72,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir release-check
+          gh api "repos/$GH_REPO/releases" --paginate --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .assets" > release-check/assets.json
+          node tools/prepare-update-manifest.mjs release-check/latest.json release-check/assets.json "${GITHUB_REF_NAME#v}"
+          gh release upload "$GITHUB_REF_NAME" release-check/latest.json --clobber
           node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:assert/strict'; const manifest=JSON.parse(fs.readFileSync('release-check/latest.json')); assert.equal(manifest.version, process.env.GITHUB_REF_NAME.slice(1)); for (const target of ['windows-x86_64','darwin-aarch64','darwin-x86_64']) { const asset=manifest.platforms[target]; assert.ok(asset?.signature); assert.ok(asset.url.startsWith('https://github.com/royluo2026/AppFlash/releases/download/'+process.env.GITHUB_REF_NAME+'/')); }"
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
