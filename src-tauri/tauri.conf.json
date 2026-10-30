@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AppFlash",
+  "version": "0.1.0",
+  "identifier": "local.appflash.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "settings",
+        "title": "AppFlash",
+        "url": "index.html",
+        "width": 780,
+        "height": 720,
+        "minWidth": 640,
+        "minHeight": 600,
+        "visible": false
+      },
+      {
+        "label": "overlay",
+        "title": "AppFlash hint",
+        "url": "overlay.html",
+        "width": 120,
+        "height": 640,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "requireSignedVersion": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1QjQwQzI1NENERDU4MTgKUldRWVdOMU1KUXkwNWFQb3pYTzFXclEycU1CZzEvOEpSN0ZXTzluLzJtY2dyNmlQOHVzd0JxTkEK",
+      "endpoints": [
+        "https://github.com/royluo2026/AppFlash/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

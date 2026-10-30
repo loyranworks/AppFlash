@@ -1,0 +1,26 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const html = fs.readFileSync(path.join(__dirname, 'content/settings-compact-customizable.html'), 'utf8');
+const start = html.indexOf('function hintSummary(');
+const end = html.indexOf('function updateHint()', start);
+assert(start >= 0 && end > start);
+const context = {};
+vm.createContext(context);
+vm.runInContext(html.slice(start, end), context);
+assert.match(context.hintSummary(false, 1.5, '右'), /已关闭.*仍然可用/);
+assert.equal(context.hintSummary(true, 1.5, '右'), '按住 1.5 秒后，在右侧显示提示。');
+assert.equal(context.hintSummary(true, 0, '左'), '按住后立即在左侧显示提示。');
+assert.match(context.hintSummary(true, NaN, '右'), /请输入/);
+assert.match(context.hintSummary(true, -1, '右'), /请输入/);
+assert.match(context.hintSummary(true, 11, '右'), /请输入/);
+assert.match(context.hintSummary(true, 10, '左'), /按住 10 秒/);
+assert.equal((html.match(/class="app-row"/g) || []).length, 8);
+assert.match(html, /height:264px;overflow-y:auto/);
+assert.match(html, /你的应用，一闪即达。/);
+const maskIds = [...html.matchAll(/<mask id="([^"]+)"/g)].map(match => match[1]);
+assert.equal(maskIds.length, 8);
+assert.equal(new Set(maskIds).size, 8);
+console.log('PASS: hint options, delay boundaries, compact eight-app list, slogan, unique SVG masks');

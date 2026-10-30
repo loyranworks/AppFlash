@@ -1,0 +1,1 @@
+AppFlash updater signature verification fixture.
