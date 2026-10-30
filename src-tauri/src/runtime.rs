@@ -333,9 +333,14 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = handle.emit("app-error", error);
                     continue;
                 }
-                let _ = handle.emit_to("overlay", "hint-show", ());
-                if overlay.show().is_ok() {
-                    visible = true;
+                match overlay.show() {
+                    Ok(()) => {
+                        visible = true;
+                        let _ = handle.emit_to("overlay", "hint-show", ());
+                    }
+                    Err(error) => {
+                        let _ = handle.emit("app-error", error.to_string());
+                    }
                 }
             }
         }

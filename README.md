@@ -6,7 +6,7 @@
 
 专注于应用切换的 Windows / macOS 桌面工具。一个自定义 Prefix 加一个字母，启动、唤起、切换或最小化常用应用。没有搜索框，不添加与切换无关的功能。
 
-> 当前处于调试阶段：Windows 可构建；macOS 原生适配尚待实机验收。同一个 royluo2026/AppFlash 仓库已公开；通过正式 Release 测试签名升级，仍不承诺稳定版质量。
+> 当前处于调试阶段：Windows 可构建；macOS 原生适配尚待实机验收。同一个 loyranworks/AppFlash 仓库已公开；通过正式 Release 测试签名升级，仍不承诺稳定版质量。
 
 ## 快速开始
 

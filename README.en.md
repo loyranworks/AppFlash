@@ -6,7 +6,7 @@ English · [简体中文](README.md)
 
 A focused Windows / macOS application switcher. Hold your chosen prefix and press one letter to launch, restore, cycle through or minimize an app. No search box, no unrelated features.
 
-> In development: Windows builds are available locally; macOS still needs on-device verification. The same royluo2026/AppFlash repository is public. Signed updates are being tested through official Releases; this is not yet a stable release.
+> In development: Windows builds are available locally; macOS still needs on-device verification. The same loyranworks/AppFlash repository is public. Signed updates are being tested through official Releases; this is not yet a stable release.
 
 ## Get started
 

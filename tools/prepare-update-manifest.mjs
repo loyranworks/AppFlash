@@ -8,9 +8,9 @@ export function prepareManifest(manifest, assets, version) {
     assert.ok(platform.signature);
     const asset = assets.find(asset => platform.url === asset.url || platform.url === asset.browser_download_url);
     assert.ok(asset, 'Update URL must identify a release asset');
-    assert.ok(asset.browser_download_url.startsWith('https://github.com/royluo2026/AppFlash/releases/download/'));
+    assert.ok(asset.browser_download_url.startsWith('https://github.com/loyranworks/AppFlash/releases/download/'));
     assert.ok(asset.name && !asset.name.includes('/'));
-    platform.url = 'https://github.com/royluo2026/AppFlash/releases/download/v' + version + '/' + encodeURIComponent(asset.name);
+    platform.url = 'https://github.com/loyranworks/AppFlash/releases/download/v' + version + '/' + encodeURIComponent(asset.name);
   }
   return manifest;
 }

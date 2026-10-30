@@ -2,12 +2,16 @@
 
 GitHub CLI 已取得 workflow 授权，正式工作流位于 .github/workflows/release.yml，仅推送 v* 标签才触发发布。普通 main 提交不发布安装包。已配置更新签名 Secret；v0.1.1 已正式发布，公开更新清单及三个平台的下载地址已验证 HTTP 200。
 
-远端：`https://github.com/royluo2026/AppFlash.git`。源码与双语 README 已提交并通过 HTTPS 推送；项目使用独立 Git 仓库，不修改父目录仓库 remote。仓库已由维护者公开，客户端无需 GitHub Token。
+远端：`https://github.com/loyranworks/AppFlash.git`。源码与双语 README 已提交并通过 HTTPS 推送；项目使用独立 Git 仓库，不修改父目录仓库 remote。仓库已由维护者公开，客户端无需 GitHub Token。
+
+## 仓库迁移（2026-10-30）
+
+当前仓库为 loyranworks/AppFlash，Git remote、客户端更新源和清单生成脚本已同步修改。0.1.1 的旧、新清单地址均已匿名验证 HTTP 200；旧地址仍依赖 GitHub 重定向，请勿在原地址新建同名仓库。签名公钥、应用标识和配置路径保持不变，升级不会迁移或清空用户配置。0.1.2 包含贴边显示顺序修正，但长按 Prefix 的实机效果仍需验收。
 
 ## 一次性准备
 
 1. 源码与工作流已准备。使用 HTTPS / gh 登录推送即可；SSH 或连接器授权不是发布前提。发布前核对 main 的测试结果和版本，不要误改父目录仓库。
-2. **使用同一个已公开的 AppFlash 仓库。** Release endpoint 不变；发布前检查源码与历史中没有凭据、私钥和私人配置。客户端不携带 GitHub Token；仅公开源码不够，仍需含完整更新清单的正式 Release。
+2. **使用同一个已公开的 AppFlash 仓库。** 新客户端 Release endpoint 使用 loyranworks/AppFlash；发布前检查源码与历史中没有凭据、私钥和私人配置。客户端不携带 GitHub Token；仅公开源码不够，仍需含完整更新清单的正式 Release。
 3. 更新签名私钥已生成在 `C:\Users\luoyi8\.tauri\app-flash.key`，不在项目内。请自行安全备份；文件内容已配置为仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`；如密钥有密码，配置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。客户端仅包含匹配的公钥。不要将私钥提交到 Git，也不要更换公钥导致已安装客户端失去更新能力。
 4. 开启 GitHub Actions。首次发布仍需用户下载并安装安装包，开发目录的裸 exe 不作为正式便携版更新支持。
 

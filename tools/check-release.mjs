@@ -11,6 +11,6 @@ assert.equal(cargo.match(/^version = "([^"]+)"/m)?.[1], version, 'Cargo and npm 
 if (process.env.GITHUB_REF_NAME) assert.equal(process.env.GITHUB_REF_NAME, `v${version}`, 'Release tag must match app version');
 assert.equal(config.bundle.createUpdaterArtifacts, true);
 assert.equal(config.plugins.updater.requireSignedVersion, true);
-assert.equal(config.plugins.updater.endpoints[0], 'https://github.com/royluo2026/AppFlash/releases/latest/download/latest.json');
+assert.equal(config.plugins.updater.endpoints[0], 'https://github.com/loyranworks/AppFlash/releases/latest/download/latest.json');
 assert.match(Buffer.from(config.plugins.updater.pubkey, 'base64').toString(), /minisign public key/);
 console.log(`Release configuration valid: ${version}`);
