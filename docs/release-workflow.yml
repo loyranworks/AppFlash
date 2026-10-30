@@ -1,0 +1,76 @@
+name: Release AppFlash
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-flash-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: --bundles nsis
+            target: x86_64-pc-windows-msvc
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles app,dmg
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles app,dmg
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - run: node tools/check-release.mjs
+      - run: npm test
+      - name: Require updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: node -e "if (!process.env.TAURI_SIGNING_PRIVATE_KEY) throw Error('Configure TAURI_SIGNING_PRIVATE_KEY in repository Actions secrets')"
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: AppFlash ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify complete release before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir release-check
+          node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:assert/strict'; const manifest=JSON.parse(fs.readFileSync('release-check/latest.json')); assert.equal(manifest.version, process.env.GITHUB_REF_NAME.slice(1)); for (const target of ['windows-x86_64','darwin-aarch64','darwin-x86_64']) { const asset=manifest.platforms[target]; assert.ok(asset?.signature); assert.ok(asset.url.startsWith('https://github.com/royluo2026/AppFlash/releases/download/'+process.env.GITHUB_REF_NAME+'/')); }"
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

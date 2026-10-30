@@ -1,5 +1,7 @@
 # 发布与升级
 
+源码已推送到私有仓库的 main。当前 gh OAuth 授权缺少 workflow scope，不能上传 Actions 工作流。模板保存在 docs/release-workflow.yml；本地 .github/workflows/release.yml 仍保留。通过 gh auth refresh -h github.com -s workflow 补充授权后，将模板提交到 .github/workflows/release.yml 才能启用自动发布。目前远端没有启用发布工作流。
+
 远端：`https://github.com/royluo2026/AppFlash.git`。HTTPS 读取与 `gh repo clone royluo2026/AppFlash` 已成功，当前 `gh` 账号为 royluo2026，仓库权限 ADMIN。本次只克隆到临时目录核对，没有修改父目录 Git 仓库的 remote，也没有自动提交或推送。
 
 ## 一次性准备
