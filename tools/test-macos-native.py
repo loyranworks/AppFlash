@@ -114,6 +114,75 @@ def cold_fullscreen_controls(helper, path, application, root):
           "; pre-collapse refresh count=2; other exact window activated; fullscreen collapse preserved", flush=True)
 
 
+def fullscreen_keyboard_controls(helper, path, application, destination_path, destination, root, rebuild_root=False):
+    """Two real fullscreen apps must receive keys, including after hide/restore."""
+    paths = [path, destination_path]
+    processes = [application, destination]
+    state_paths = [root / "fixture-state.json", root / "departure-state.json"]
+
+    def state(index):
+        try:
+            return json.loads(state_paths[index].read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def wait(index, check):
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            actual = state(index)
+            if actual and check(actual):
+                return actual
+            time.sleep(0.02)
+        raise AssertionError({"fixture": index, "state": state(index)})
+
+    key_source = root / "key.swift"
+    key_binary = root / "send-key"
+    key_source.write_text('''import ApplicationServices
+let source = CGEventSource(stateID: .hidSystemState)!
+for down in [true, false] {
+    let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
+    event.flags = []
+    event.post(tap: .cghidEventTap)
+    usleep(20000)
+}
+''')
+    subprocess.run(["swiftc", str(key_source), "-o", str(key_binary)], check=True)
+    for index, process in enumerate(processes):
+        wait(index, lambda s: s["launched"])
+        process.send_signal(signal.SIGUSR1)
+        wait(index, lambda s: s["fullscreen_phase"] == "entered" and s["active"])
+        process.send_signal(signal.SIGUSR2)
+        wait(index, lambda s: len(s["windows"]) == 1)
+
+    def target(index):
+        reply = request(helper, {"command": "snapshot", "path": str(paths[index])})
+        assert "data" in reply and len(reply["data"]["windows"]) == 1, reply
+        return reply["data"]["windows"][0]["id"]
+
+    ids = [target(0), target(1)]
+    for round_index in range(4):
+        for index in range(2):
+            if rebuild_root and index == 0:
+                previous_generation = state(index)["inventory_requests"]
+                previous_number = state(index)["windows"][0]["window_number"]
+                processes[index].send_signal(signal.SIGINFO)
+                wait(index, lambda s: s["inventory_requests"] > previous_generation)
+                assert state(index)["windows"][0]["window_number"] == previous_number
+            reply = request(helper, {"command": "activate", "id": ids[index]})
+            assert reply == {"data": True}, {"round": round_index, "fixture": index, "reply": reply, "state": state(index)}
+            actual = wait(index, lambda s: s["active"] and not s["hidden"] and s["windows"][0]["key"] and s["windows"][0]["on_active_space"])
+            count = actual["test_key_count"]
+            # Never send test input unless the foreground is our own fixture.
+            subprocess.run([str(key_binary)], check=True)
+            wait(index, lambda s: s["test_key_count"] > count)
+            prepared = request(helper, {"command": "prepare-collapse", "path": str(paths[index]), "ids": [ids[index]]})
+            assert "data" in prepared, prepared
+            reply = request(helper, {"command": "collapse", "ids": [ids[index]]})
+            assert reply == {"data": True}, reply
+            wait(index, lambda s: s["hidden"] and s["fullscreen"])
+        print("Two fullscreen applications received real keyboard input and hid/restored, round", round_index + 1, flush=True)
+
+
 def window_controls(helper, path, application, root, fullscreen=False, check_space=False, self_hide_probe=False):
     state_file = root / "fixture-state.json"
     identities = {}
@@ -309,7 +378,9 @@ def main():
     self_hide_probe = "--self-hide-probe" in sys.argv[2:]
     cold_fullscreen = "--cold-fullscreen" in sys.argv[2:]
     busy_target = "--busy-target" in sys.argv[2:]
-    fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe or cold_fullscreen
+    rebuild_focus_root = "--refresh-focus-root" in sys.argv[2:]
+    fullscreen_keyboard = "--fullscreen-keyboard" in sys.argv[2:] or rebuild_focus_root
+    fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe or cold_fullscreen or fullscreen_keyboard
     check_space = "--check-space" in sys.argv[2:]
     control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space or busy_target
     with tempfile.TemporaryDirectory(prefix="appflash-native-test-") as temporary:
@@ -357,6 +428,11 @@ applicationMenuItem.submenu = applicationMenu
 mainMenu.addItem(applicationMenuItem)
 app.mainMenu = mainMenu
 var windows: [NSWindow] = []
+var testKeyCount = 0
+let testKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    if event.keyCode == 0 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { testKeyCount += 1 }
+    return event
+}
 if CommandLine.arguments.contains("--windows") {
     for index in 0..<2 {
         let window = NSWindow(contentRect: NSRect(x: 100 + index * 80, y: 100, width: 360, height: 200), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -397,12 +473,17 @@ if let statePath = statePath {
         app.hide(nil)
     }
     selfHideSource.resume()
-    // A failing pending-retry test can request one read-only WindowServer dump.
+    // SIGINFO requests a WindowServer inventory; the root-refresh mode also
+    // rebuilds only this fixture window's AX identity.
     signal(SIGINFO, SIG_IGN)
     var inventoryRequests = 0
     var cgInventory: [[String: Any]] = []
     let inventorySource = DispatchSource.makeSignalSource(signal: SIGINFO, queue: .main)
     inventorySource.setEventHandler {
+        if ProcessInfo.processInfo.environment["APPFLASH_REBUILD_FOCUS_ROOT"] != nil, let window = windows.first {
+            window.orderOut(nil)
+            window.orderFront(nil)
+        }
         inventoryRequests += 1
         let all = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         cgInventory = all.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == ProcessInfo.processInfo.processIdentifier }
@@ -410,6 +491,11 @@ if let statePath = statePath {
     inventorySource.resume()
     var fullscreenPhase = "windowed"
     var observers: [NSObjectProtocol] = []
+    if ProcessInfo.processInfo.environment["APPFLASH_REBUILD_FOCUS_ROOT"] != nil {
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didUnhideNotification, object: app, queue: .main) { _ in
+            if let window = windows.first { window.orderOut(nil); window.orderFront(nil) }
+        })
+    }
     for (name, phase) in [(NSWindow.willEnterFullScreenNotification, "entering"), (NSWindow.didEnterFullScreenNotification, "entered"), (NSWindow.willExitFullScreenNotification, "exiting"), (NSWindow.didExitFullScreenNotification, "exited")] {
         observers.append(NotificationCenter.default.addObserver(forName: name, object: windows.first, queue: .main) { _ in fullscreenPhase = phase })
     }
@@ -419,7 +505,7 @@ if let statePath = statePath {
         let windowStates: [[String: Any]] = windows.map { window in
             ["window_number": window.windowNumber, "identifier": window.identifier?.rawValue ?? "", "key": window.isKeyWindow, "main": window.isMainWindow, "on_active_space": window.isOnActiveSpace, "occlusion": window.occlusionState.rawValue, "occlusion_visible": window.occlusionState.contains(.visible), "fullscreen": window.styleMask.contains(.fullScreen), "minimized": window.isMiniaturized, "visible": window.isVisible]
         }
-        let state: [String: Any] = ["sample": sample, "inventory_requests": inventoryRequests, "cg_inventory": cgInventory, "self_hide_requests": selfHideRequests, "launched": fixtureDelegate.launched, "app_window_count": app.windows.count, "fullscreen": windows.first?.styleMask.contains(.fullScreen) ?? false, "fullscreen_phase": fullscreenPhase, "active": app.isActive, "hidden": app.isHidden, "windows": windowStates]
+        let state: [String: Any] = ["sample": sample, "test_key_count": testKeyCount, "inventory_requests": inventoryRequests, "cg_inventory": cgInventory, "self_hide_requests": selfHideRequests, "launched": fixtureDelegate.launched, "app_window_count": app.windows.count, "fullscreen": windows.first?.styleMask.contains(.fullScreen) ?? false, "fullscreen_phase": fullscreenPhase, "active": app.isActive, "hidden": app.isHidden, "windows": windowStates]
         if let data = try? JSONSerialization.data(withJSONObject: state) {
             try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
         }
@@ -449,20 +535,25 @@ if let statePath = statePath {
                         "CFBundlePackageType": "APPL",
                     }, stream)
                 departure = subprocess.Popen([str(destination_executable), "--windows"],
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             env=dict(os.environ, APPFLASH_FIXTURE_STATE=str(root / "departure-state.json")))
                 time.sleep(0.3)
             helper = subprocess.Popen([str(native)], stdin=subprocess.PIPE,
                                       stdout=subprocess.PIPE, text=True, bufsize=1)
             assert not listed(helper, fixture.resolve())
             arguments = [str(executable)] + (["--windows"] if control_windows else [])
             environment = dict(os.environ)
+            if rebuild_focus_root:
+                environment["APPFLASH_REBUILD_FOCUS_ROOT"] = "1"
             if control_windows:
                 environment["APPFLASH_FIXTURE_STATE"] = str(root / "fixture-state.json")
             application = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL, env=environment)
             wait_listed(helper, fixture.resolve(), True)
             if control_windows:
-                if busy_target:
+                if fullscreen_keyboard:
+                    fullscreen_keyboard_controls(helper, fixture.resolve(), application, destination.resolve(), departure, root, rebuild_focus_root)
+                elif busy_target:
                     busy_target_controls(helper, fixture.resolve(), application)
                 elif cold_fullscreen:
                     cold_fullscreen_controls(helper, fixture.resolve(), application, root)

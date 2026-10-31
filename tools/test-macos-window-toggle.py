@@ -103,7 +103,9 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
 withExtendedLifetime((timer, auxiliary, windows)) { app.run() }
 ''')
         subprocess.run(["swiftc", str(source), "-o", str(executable)], check=True)
-        counts = [int(sys.argv[2])] if len(sys.argv) > 2 else [1, 3]
+        latency = "--latency" in sys.argv[2:]
+        requested = [argument for argument in sys.argv[2:] if not argument.startswith("--")]
+        counts = [int(requested[0])] if requested else ([1] if latency else [1, 3])
         for count in counts:
             helper = application = None
             state_path = root / ("state-" + str(count) + ".json")
@@ -129,6 +131,18 @@ withExtendedLifetime((timer, auxiliary, windows)) { app.run() }
 
                 current = wait_for(snapshot, lambda s: len(s["windows"]) == count)
                 ids = [window["id"] for window in current["windows"]]
+                if latency:
+                    durations = []
+                    for _ in range(4):
+                        time.sleep(1.05)
+                        began = time.monotonic()
+                        actual = snapshot()
+                        durations.append(time.monotonic() - began)
+                        assert [window["id"] for window in actual["windows"]] == ids, actual
+                        assert state()["auxiliary_present"], "Unknown surface must remain present"
+                    print(json.dumps({"warm_snapshot_ms": [round(value * 1000, 1) for value in durations]}), flush=True)
+                    assert max(durations) < 0.10, "Known window operations repeatedly wait for unresolved auxiliary surfaces"
+                    continue
                 identities = {}
                 for round_index in range(3):
                     visited = []

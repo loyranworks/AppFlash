@@ -3,10 +3,13 @@ import ApplicationServices
 import Darwin
 
 struct NativeFailure: Error { let message: String }
-struct StoredWindow { let element: AXUIElement; let app: NSRunningApplication; let minimized: Bool }
+struct StoredWindow { let element: AXUIElement; let app: NSRunningApplication; let minimized: Bool; let number: CGWindowID? }
 var stored: [UInt64: StoredWindow] = [:]
 var nextID: UInt64 = 1
 let traceWindowControl = ProcessInfo.processInfo.environment["APPFLASH_TRACE_WINDOW_CONTROL"] != nil
+// Idle discovery must never run reentrantly while an activation yields AppKit's
+// run loop to finish a Space transition.
+var handlingRequest = false
 
 func readAttribute(_ element: AXUIElement, _ key: String) -> (AXError, CFTypeRef?) {
     let began = ProcessInfo.processInfo.systemUptime
@@ -59,6 +62,21 @@ func activeQuartzDisplayBounds() -> [CGRect]? {
 // AX windows. Keep scanning on later snapshots to supplement the public lists.
 // Explicit nonstandard AXWindow
 // roots are excluded only after classification and revalidated on later snapshots.
+func prioritizedWindowCandidates(known: [AXUIElement], verified: [AXUIElement]) -> [AXUIElement] {
+    var callbacks = kCFTypeSetCallBacks
+    let seen = CFSetCreateMutable(kCFAllocatorDefault, 0, &callbacks)!
+    for root in known { CFSetAddValue(seen, Unmanaged.passUnretained(root).toOpaque()) }
+    var supplemental: [AXUIElement] = []
+    for root in verified {
+        let pointer = Unmanaged.passUnretained(root).toOpaque()
+        if !CFSetContainsValue(seen, pointer) {
+            supplemental.append(root)
+            CFSetAddValue(seen, pointer)
+        }
+    }
+    return supplemental + known
+}
+
 private final class CrossSpaceWindowDiscovery {
     typealias WindowIDFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> Int32
     typealias TokenFunction = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
@@ -75,6 +93,12 @@ private final class CrossSpaceWindowDiscovery {
     private let windowID: WindowIDFunction?
     private let fromToken: TokenFunction?
     private var progress: [pid_t: Progress] = [:]
+    private struct IdleScan {
+        var known: [AXUIElement]
+        var remaining: TimeInterval
+    }
+    private var idleScans: [pid_t: IdleScan] = [:]
+    private var idleScheduled = false
 
     private init() {
         // Keep the framework loaded as long as the resolved function pointers.
@@ -92,14 +116,53 @@ private final class CrossSpaceWindowDiscovery {
 
     func removeExited(_ livePIDs: Set<pid_t>) {
         progress = progress.filter { livePIDs.contains($0.key) }
+        idleScans = idleScans.filter { livePIDs.contains($0.key) }
+    }
+
+    private func queueIdleScan(pid: pid_t, known: [AXUIElement], newInventory: Bool) {
+        if var pending = idleScans[pid] {
+            pending.known = known
+            if newInventory { pending.remaining = 0.15 }
+            idleScans[pid] = pending
+        } else if newInventory || ProcessInfo.processInfo.systemUptime - (progress[pid]?.lastScan ?? -.infinity) >= 5 {
+            idleScans[pid] = IdleScan(known: known, remaining: 0.15)
+        }
+        scheduleIdleScan()
+    }
+
+    private func scheduleIdleScan() {
+        guard !idleScheduled, !idleScans.isEmpty else { return }
+        idleScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(20)) {
+            self.idleScheduled = false
+            if !handlingRequest, let pid = self.idleScans.keys.sorted().first,
+               var job = self.idleScans.removeValue(forKey: pid) {
+                let began = ProcessInfo.processInfo.systemUptime
+                _ = self.additionalWindows(pid: pid, known: job.known, scanBudget: 0.004)
+                job.remaining -= max(0.004, ProcessInfo.processInfo.systemUptime - began)
+                if job.remaining > 0, self.progress[pid]?.missing.isEmpty == false {
+                    self.idleScans[pid] = job
+                }
+            }
+            self.scheduleIdleScan()
+        }
+    }
+
+    func number(of window: AXUIElement) -> CGWindowID? {
+        guard let getID = windowID else { return nil }
+        var id: CGWindowID = 0
+        guard getID(window, &id) == AXError.success.rawValue, id != 0 else { return nil }
+        return id
+    }
+
+    func isOnscreen(number id: CGWindowID) -> Bool? {
+        guard let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        return visible.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
     }
 
     func isOnscreen(_ window: AXUIElement) -> Bool? {
-        guard let getID = windowID else { return nil }
-        var id: CGWindowID = 0
-        guard getID(window, &id) == AXError.success.rawValue, id != 0,
-              let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        return visible.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
+        guard let id = number(of: window) else { return nil }
+        return isOnscreen(number: id)
     }
 
     private func classify(_ window: AXUIElement, deadline: TimeInterval) -> Classification {
@@ -151,8 +214,8 @@ private final class CrossSpaceWindowDiscovery {
         return frames
     }
 
-    func additionalWindows(pid: pid_t, known: [AXUIElement]) -> [AXUIElement] {
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.15
+    func additionalWindows(pid: pid_t, known: [AXUIElement], scanBudget: TimeInterval = 0) -> [AXUIElement] {
+        var deadline = ProcessInfo.processInfo.systemUptime + 0.012
         guard let inventory = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
@@ -186,7 +249,14 @@ private final class CrossSpaceWindowDiscovery {
             state.retired.formIntersection(observedCGIDs)
             progress[pid] = state
         }
-        guard !missing.isEmpty else { return [] }
+        guard !missing.isEmpty else {
+            if var state = progress[pid] {
+                state.missing.removeAll()
+                progress[pid] = state
+            }
+            idleScans.removeValue(forKey: pid)
+            return []
+        }
         // Without either optional symbol, public enumeration/activation remains
         // usable, including operations on its confirmed windows.
         guard let getID = windowID, let create = fromToken else {
@@ -194,9 +264,16 @@ private final class CrossSpaceWindowDiscovery {
         }
         let inventoryIDs = missing
         var state = progress[pid] ?? Progress()
+        var found: [AXUIElement] = []
         var seenKnown: [AXUIElement] = []
         var currentValidRoots = Set<CGWindowID>()
-        for window in known {
+        // Idle scans discover exact roots without assigning public window IDs.
+        // Revalidate and merge them on the next snapshot just like cached AX roots.
+        let candidates = prioritizedWindowCandidates(known: known, verified: Array(state.verifiedRoots.values))
+        // Inventory and local identity ordering must not exhaust validation's
+        // allowance before its first newly discovered root can be admitted.
+        deadline = ProcessInfo.processInfo.systemUptime + 0.012
+        for window in candidates {
             if ProcessInfo.processInfo.systemUptime >= deadline { break }
             if seenKnown.contains(where: { CFEqual($0, window) }) { continue }
             seenKnown.append(window)
@@ -210,6 +287,7 @@ private final class CrossSpaceWindowDiscovery {
                 missing.remove(id)
                 currentValidRoots.insert(id)
                 state.verifiedRoots[id] = window
+                if !known.contains(where: { CFEqual($0, window) }) { found.append(window) }
             case .excluded:
                 missing.remove(id)
                 currentValidRoots.insert(id)
@@ -235,7 +313,6 @@ private final class CrossSpaceWindowDiscovery {
         state.retired.subtract(currentValidRoots)
         missing.subtract(state.retired.intersection(inventoryOffscreen))
         state.nonStandard = state.nonStandard.filter { inventoryIDs.contains($0.key) }
-        var found: [AXUIElement] = []
         for (id, window) in state.nonStandard where missing.contains(id) {
             if ProcessInfo.processInfo.systemUptime >= deadline { break }
             AXUIElementSetMessagingTimeout(window, 0.005)
@@ -274,14 +351,18 @@ private final class CrossSpaceWindowDiscovery {
             return found
         }
         // A newly missing CG ID may belong to an element before the saved cursor.
-        if !missing.isSubset(of: state.missing) { state.cursor = 0 }
+        let newInventory = !missing.isSubset(of: state.missing)
+        if newInventory { state.cursor = 0 }
         state.missing = missing
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now - state.lastScan >= 1 else {
+        if scanBudget == 0 {
             progress[pid] = state
+            queueIdleScan(pid: pid, known: known, newInventory: newInventory)
             return found
         }
-        state.lastScan = now
+        state.lastScan = ProcessInfo.processInfo.systemUptime
+        // Inventory validation has its own bounded allowance. Large public
+        // lists must not consume every idle slice before a token can advance.
+        deadline = ProcessInfo.processInfo.systemUptime + scanBudget
         scan: while !missing.isEmpty && ProcessInfo.processInfo.systemUptime < deadline {
             let number = state.cursor
             state.cursor &+= 1
@@ -397,7 +478,7 @@ func departureWindows(_ app: NSRunningApplication, deadline: Date) -> [StoredWin
     var result: [StoredWindow] = []
     for root in roots where Date() < deadline {
         if result.contains(where: { CFEqual($0.element, root) }) { continue }
-        let window = StoredWindow(element: root, app: app, minimized: false)
+        let window = StoredWindow(element: root, app: app, minimized: false, number: CrossSpaceWindowDiscovery.shared.number(of: root))
         if departureWindowIsEligible(window, deadline: deadline) { result.append(window) }
     }
     return result
@@ -482,25 +563,95 @@ func collapse(_ windows: [StoredWindow]) throws {
     }
 }
 
-func hasExactFocus(_ window: StoredWindow, deadline: Date) -> Bool {
+func hasExactFocus(_ window: StoredWindow, deadline: Date, observed: ((pid_t, Bool) -> Void)? = nil) -> Bool {
     let system = AXUIElementCreateSystemWide()
     guard Date() < deadline,
           let focusedApp = attribute(system, kAXFocusedApplicationAttribute),
           CFGetTypeID(focusedApp) == AXUIElementGetTypeID() else { return false }
     let application = unsafeBitCast(focusedApp, to: AXUIElement.self)
     var pid: pid_t = 0
-    guard AXUIElementGetPid(application, &pid) == .success,
-          pid == window.app.processIdentifier, Date() < deadline,
+    guard AXUIElementGetPid(application, &pid) == .success else { return false }
+    observed?(pid, false)
+    guard pid == window.app.processIdentifier, Date() < deadline,
           let focusedWindow = attribute(application, kAXFocusedWindowAttribute) else { return false }
-    return CFEqual(focusedWindow, window.element)
+    let exact = CFEqual(focusedWindow, window.element)
+    observed?(pid, exact)
+    return exact
 }
 
-func activate(_ window: StoredWindow, deadline suppliedDeadline: Date? = nil) throws {
+// Hidden apps can rebuild their AXWindow nodes while retaining the same actual
+// WindowServer window. Heal only against that exact number and owning process.
+func refreshedWindow(_ window: StoredWindow, deadline: Date) -> StoredWindow? {
+    guard let number = window.number, Date() < deadline, !window.app.isTerminated else { return nil }
+    let application = AXUIElementCreateApplication(window.app.processIdentifier)
+    var candidates: [AXUIElement] = []
+    for key in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] where Date() < deadline {
+        if let value = attribute(application, key), CFGetTypeID(value) == AXUIElementGetTypeID() {
+            candidates.append(unsafeBitCast(value, to: AXUIElement.self))
+        }
+    }
+    if Date() < deadline { candidates += attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] }
+    for root in candidates where Date() < deadline {
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(root, &owner) == .success, owner == window.app.processIdentifier,
+              CrossSpaceWindowDiscovery.shared.number(of: root) == number,
+              Date() < deadline, attribute(root, kAXRoleAttribute) as? String == kAXWindowRole else { continue }
+        let minimized = attribute(root, kAXMinimizedAttribute) as? Bool ?? false
+        guard Date() < deadline,
+              minimized || attribute(root, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole else { continue }
+        let result = StoredWindow(element: root, app: window.app, minimized: minimized, number: number)
+        for (id, previous) in stored where previous.app.processIdentifier == owner && previous.number == number {
+            stored[id] = result
+        }
+        return result
+    }
+    return nil
+}
+
+func activate(_ original: StoredWindow, deadline suppliedDeadline: Date? = nil) throws {
     let deadline = suppliedDeadline ?? Date(timeIntervalSinceNow: 1.2)
+    var window = original
+    var repairs = 0
+    var rebounds = 0
+    var focusedPID: pid_t = 0
+    var exact = false
+    var actions = "not-sent"
+    var success = false
+    defer {
+        if traceWindowControl {
+            FileHandle.standardError.write(Data("TRACE focus target_pid=\(window.app.processIdentifier) front_pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) focused_pid=\(focusedPID) exact=\(exact) repairs=\(repairs) rebounds=\(rebounds) ok=\(success) \(actions)\n".utf8))
+        }
+    }
     func requireTime() throws {
         if Date() >= deadline { throw NativeFailure(message: "系统未将焦点切换到目标窗口（可能位于其他桌面）") }
     }
+    func heal() {
+        if let live = refreshedWindow(window, deadline: deadline), !CFEqual(live.element, window.element) {
+            window = live
+            rebounds += 1
+        }
+    }
+    let application = AXUIElementCreateApplication(window.app.processIdentifier)
+    func requestFocus(repair: Bool) throws {
+        try requireTime()
+        let accepted = window.app.activate(options: [])
+        var frontmost: AXError?
+        if repair {
+            try requireTime()
+            frontmost = AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        }
+        try requireTime()
+        let main = AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        try requireTime()
+        let focusedWindow = AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute as CFString, window.element)
+        try requireTime()
+        let focused = AXUIElementSetAttributeValue(window.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        try requireTime()
+        let raised = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        actions = "activate=\(accepted) frontmost=\(frontmost.map { String($0.rawValue) } ?? "not-sent") main=\(main.rawValue) focused_window=\(focusedWindow.rawValue) focused=\(focused.rawValue) raise=\(raised.rawValue)"
+    }
     try requireTime()
+    if readAttribute(window.element, kAXRoleAttribute).0 == .invalidUIElement { heal() }
     // Full-screen windows often reject AXMinimized writes, even false -> false.
     if attribute(window.element, kAXMinimizedAttribute) as? Bool == true {
         try checkedSet(window.element, kAXMinimizedAttribute, kCFBooleanFalse)
@@ -508,20 +659,24 @@ func activate(_ window: StoredWindow, deadline suppliedDeadline: Date? = nil) th
     try requireTime()
     try setHidden(window.app, false, deadline: deadline)
     try requireTime()
-    _ = window.app.activate(options: [])
-    let application = AXUIElementCreateApplication(window.app.processIdentifier)
-    _ = AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
-    try requireTime()
-    _ = AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute as CFString, window.element)
-    try requireTime()
-    _ = AXUIElementSetAttributeValue(window.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    // AXMain success only designates the main window; always raise the exact AX
-    // reference, then require both the focused application and focused window.
-    try requireTime()
-    _ = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+    if readAttribute(window.element, kAXRoleAttribute).0 == .invalidUIElement { heal() }
+    try requestFocus(repair: false)
+    var nextRepair = Date(timeIntervalSinceNow: 0.05)
     while true {
         try requireTime()
-        if hasExactFocus(window, deadline: deadline) { return }
+        focusedPID = 0
+        exact = false
+        if hasExactFocus(window, deadline: deadline, observed: { focusedPID = $0; exact = $1 }) { success = true; return }
+        if repairs < 2 && Date() >= nextRepair {
+            nextRepair = Date(timeIntervalSinceNow: 0.12)
+            let stale = readAttribute(window.element, kAXRoleAttribute).0 == .invalidUIElement
+            let onscreen = window.number.flatMap { CrossSpaceWindowDiscovery.shared.isOnscreen(number: $0) } == true
+            if stale || onscreen {
+                heal()
+                repairs += 1
+                try requestFocus(repair: true)
+            }
+        }
         // AppKit's activation state and Space transitions need the main runloop.
         // Do not block it by polling cached NSRunningApplication.isActive.
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
@@ -613,7 +768,7 @@ func handle(_ request: [String: Any]) throws -> Any {
                 }
                 let id = existing?.key ?? nextID
                 if existing == nil { nextID += 1 }
-                stored[id] = StoredWindow(element: window, app: app, minimized: minimized)
+                stored[id] = StoredWindow(element: window, app: app, minimized: minimized, number: CrossSpaceWindowDiscovery.shared.number(of: window))
                 windows.append(["id": id, "minimized": minimized])
                 if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier, let focused = focused, CFEqual(focused, window) { active = id }
             }
@@ -669,6 +824,8 @@ if traceWindowControl { FileHandle.standardError.write(Data("TRACE system \(Proc
 DispatchQueue.global(qos: .userInitiated).async {
     while let line = readLine() {
         DispatchQueue.main.sync {
+            handlingRequest = true
+            defer { handlingRequest = false }
             autoreleasepool {
                 let response: [String: Any]
                 do {

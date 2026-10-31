@@ -25,3 +25,14 @@ fn native_helper_refreshes_running_apps_and_exits_on_eof() {
         "macOS native helper regression test failed"
     );
 }
+#[cfg(target_os = "macos")]
+#[test]
+fn idle_discovered_roots_are_not_starved_by_public_window_validation() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tools/test-macos-discovery-priority.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .status()
+        .expect("Run native candidate admission regression")
+        .success());
+}
