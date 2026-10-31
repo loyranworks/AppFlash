@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { english, setLanguage, t, message, errorMessage, translatePage } from './i18n.js';
+import { english, setLanguage, t, message, errorMessage, errorText, translatePage } from './i18n.js';
 import { selectSection, initializeNavigation } from './navigation.js';
 
 test('all static settings text has English translations', () => {
@@ -50,4 +50,25 @@ test('General comes first and Prefix controls share the application panel', () =
   assert.match(apps, /id="app-list"/);
   assert.doesNotMatch(html, /data-panel="shortcuts"/);
   assert.match(html, /界面语言 \/ Language/);
+});
+
+// These errors originate in the native switch path, including full-screen departure.
+test('native switch recovery guidance is translated for the active interface language', () => {
+  setLanguage('en');
+  try {
+    assert.equal(errorText('未能切离目标全屏桌面；请保持另一个应用窗口可用后重试，目标应用尚未收起。'), 'Could not leave the target fullscreen desktop. Keep another app window available and try again. The target app is still open.');
+    assert.equal(errorText('目标应用暂时没有响应，请在桌面切换完成后重试。'), 'The target app is temporarily unresponsive. Try again after the desktop switch finishes.');
+  } finally { setLanguage('zh-CN'); }
+});
+
+test('native log export failures translate the action while preserving operating-system details', () => {
+  setLanguage('en');
+  try {
+    for (const [source, expected] of [
+      ['此窗口不能导出日志。', 'This window cannot export logs.'],
+      ['无法读取导出位置：invalid path', 'Cannot read export location: invalid path'],
+      ['导出任务未完成：cancelled worker', 'Log export did not complete: cancelled worker'],
+      ['导出日志失败：Permission denied (os error 13)', 'Log export failed: Permission denied (os error 13)'],
+    ]) assert.equal(errorText(source), expected);
+  } finally { setLanguage('zh-CN'); }
 });

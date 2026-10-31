@@ -28,12 +28,18 @@ pub struct Runtime {
     pub changing: AtomicBool,
     pub editing: AtomicBool,
     pub sender: Sender<KeyEvent>,
+    #[cfg(target_os = "macos")]
+    pub input_gate: crate::macos_input::Gate,
     pub config_path: PathBuf,
     pub _instance: File,
+    pub notices: Mutex<crate::overlay_notice::Notices>,
 }
 
 pub enum KeyEvent {
+    #[cfg(not(target_os = "macos"))]
     Press(String),
+    #[cfg(target_os = "macos")]
+    Press(String, crate::macos_input::Permit),
     Release(String),
 }
 
@@ -52,6 +58,7 @@ pub struct Status {
     pub error: Option<String>,
     pub config_path: String,
     pub platform: String,
+    pub notice: Option<crate::overlay_notice::Notice>,
 }
 
 struct NativeRegistry<'a>(&'a AppHandle);
@@ -78,6 +85,12 @@ pub fn status(runtime: &Runtime) -> Status {
         error: data.startup_error.clone(),
         config_path: runtime.config_path.to_string_lossy().into(),
         platform: std::env::consts::OS.into(),
+        notice: runtime
+            .notices
+            .lock()
+            .unwrap()
+            .present(Instant::now(), false)
+            .notice,
     }
 }
 
@@ -122,6 +135,9 @@ pub fn save(app: &AppHandle, config: Config) -> Result<Status, String> {
 
 pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
     let runtime = app.state::<Arc<Runtime>>();
+    if paused {
+        runtime.notices.lock().unwrap().clear();
+    }
     if runtime.changing.swap(true, Ordering::SeqCst) {
         return Err("正在更新绑定，请稍后再试".into());
     }
@@ -165,11 +181,25 @@ pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
             .map(|key| key.id() == id)
             .unwrap_or(false)
     }) {
-        let _ = runtime.sender.send(if pressed {
+        #[cfg(target_os = "macos")]
+        let event = if pressed {
+            let Some(permit) = runtime.input_gate.try_begin() else {
+                if std::env::var_os("APPFLASH_TRACE_WINDOW_CONTROL").is_some() {
+                    eprintln!("TRACE busy press discarded");
+                }
+                return;
+            };
+            KeyEvent::Press(app_id, permit)
+        } else {
+            KeyEvent::Release(app_id)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let event = if pressed {
             KeyEvent::Press(app_id)
         } else {
             KeyEvent::Release(app_id)
-        });
+        };
+        let _ = runtime.sender.send(event);
     }
 }
 
@@ -192,9 +222,30 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let path = directory.join("config.json");
+    if let Ok(log_directory) = app.path().app_log_dir() {
+        if let Err(error) =
+            crate::diagnostics::init(log_directory, &app.package_info().version.to_string())
+        {
+            eprintln!("Local diagnostics unavailable: {error}");
+        }
+    }
+    crate::diagnostics::record(
+        "startup",
+        &format!(
+            "version={} os={} arch={}",
+            app.package_info().version,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ),
+    );
     let loaded = config::read(&path);
     let unreadable = loaded.is_err();
     let error = loaded.as_ref().err().cloned();
+    let mut notices = crate::overlay_notice::Notices::default();
+    if let Some(error) = &error {
+        notices.show(error, Instant::now());
+        crate::diagnostics::record("config.error", error);
+    }
     let config = loaded.unwrap_or_default();
     let (sender, receiver) = mpsc::channel();
     let runtime = Arc::new(Runtime {
@@ -208,12 +259,17 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         changing: AtomicBool::new(false),
         editing: AtomicBool::new(true),
         sender,
+        #[cfg(target_os = "macos")]
+        input_gate: crate::macos_input::Gate::default(),
         config_path: path,
         _instance: instance,
+        notices: Mutex::new(notices),
     });
     app.manage(runtime.clone());
     if !unreadable {
         if let Err(error) = pause(app, false) {
+            runtime.notices.lock().unwrap().show(&error, Instant::now());
+            crate::diagnostics::record("startup.error", &error);
             let mut data = runtime.data.lock().unwrap();
             data.paused = true;
             data.startup_error = Some(error);
@@ -243,8 +299,14 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            let id = match event {
-                KeyEvent::Press(id) => id,
+            // Keep the admission permit alive through native execution and all
+            // early exits. Key-up still clears held state while busy presses
+            // never enter the queue, even when AX or a Space transition stalls.
+            let (id, _permit) = match event {
+                #[cfg(target_os = "macos")]
+                KeyEvent::Press(id, permit) => (id, permit),
+                #[cfg(not(target_os = "macos"))]
+                KeyEvent::Press(id) => (id, ()),
                 KeyEvent::Release(id) => {
                     let data = worker.data.lock().unwrap();
                     if let Some(entry) = data.config.apps.iter().find(|entry| entry.id == id) {
@@ -272,6 +334,12 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             let _ = handle.emit("app-hit", &id);
+            let began = Instant::now();
+            let target = std::path::Path::new(&entry.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown");
+            crate::diagnostics::record("switch.begin", &format!("target={target}"));
             let result = platform::snapshot(&entry.path).and_then(|snapshot| {
                 #[cfg(target_os = "macos")]
                 let (candidate, action) =
@@ -300,12 +368,41 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 result
             });
+            #[cfg(target_os = "macos")]
+            if std::env::var_os("APPFLASH_TRACE_WINDOW_CONTROL").is_some() {
+                eprintln!(
+                    "TRACE switch completed {:.3}s",
+                    began.elapsed().as_secs_f64()
+                );
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let dropped = worker.input_gate.take_dropped();
+                if dropped > 0 {
+                    crate::diagnostics::record(
+                        "input",
+                        &format!("discarded_busy_presses={dropped}"),
+                    );
+                }
+            }
+            crate::diagnostics::record(
+                if result.is_ok() {
+                    "switch.done"
+                } else {
+                    "switch.error"
+                },
+                &format!(
+                    "target={target} elapsed_ms={} result={}",
+                    began.elapsed().as_millis(),
+                    result.as_ref().err().map(String::as_str).unwrap_or("ok")
+                ),
+            );
+            if result.is_ok() {
+                worker.notices.lock().unwrap().clear();
+            }
             if let Err(error) = result {
                 launching.remove(&id);
-                let _ = handle.emit("app-error", &error);
-                if let Some(tray) = handle.tray_by_id("main") {
-                    let _ = tray.set_tooltip(Some(format!("AppFlash：{error}")));
-                }
+                worker.notices.lock().unwrap().show(&error, Instant::now());
                 eprintln!("{error}");
             }
         }
@@ -314,8 +411,17 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || {
         let mut began: Option<Instant> = None;
         let mut visible = false;
+        let mut last_notice = None;
+        let mut notice_geometry = false;
+        let mut next_attempt = Instant::now();
+        let mut last_maintenance = Instant::now();
         loop {
             std::thread::sleep(Duration::from_millis(25));
+            let now = Instant::now();
+            if last_maintenance.elapsed() >= Duration::from_secs(3600) {
+                crate::diagnostics::maintenance();
+                last_maintenance = now;
+            }
             let data = runtime.data.lock().unwrap();
             let hint = data.config.hint.clone();
             let prefix = data.config.prefix.clone();
@@ -326,31 +432,58 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 && !runtime.editing.load(Ordering::SeqCst)
                 && hint.enabled
                 && platform::prefix_down(&prefix);
-            if !pressed {
+            let hint_ready = if pressed {
+                began.get_or_insert(now).elapsed().as_secs_f64() >= hint.delay
+            } else {
                 began = None;
+                false
+            };
+            let presentation = runtime.notices.lock().unwrap().present(now, hint_ready);
+            let notice_id = presentation.notice.as_ref().map(|notice| notice.id);
+            let changed = notice_id != last_notice;
+            if !presentation.visible {
                 if visible {
-                    let _ = set_hint_visible(&overlay, false);
+                    if let Err(error) = set_hint_visible(&overlay, false) {
+                        crate::diagnostics::record("overlay.error", &error);
+                    }
                     let _ = handle.emit_to("overlay", "hint-hide", ());
                     visible = false;
                 }
+                if changed {
+                    let _ = handle.emit_to("overlay", "switch-notice", &presentation.notice);
+                    last_notice = notice_id;
+                }
                 continue;
             }
-            let started = *began.get_or_insert_with(Instant::now);
-            if !visible && started.elapsed().as_secs_f64() >= hint.delay {
+            if now < next_attempt {
+                continue;
+            }
+            let has_notice = presentation.notice.is_some();
+            if !visible || notice_geometry != has_notice || changed {
                 let config = runtime.data.lock().unwrap().config.clone();
-                if let Err(error) = position_hint(&handle, &config) {
-                    let _ = handle.emit("app-error", error);
+                if let Err(error) = position_hint(&handle, &config, has_notice) {
+                    crate::diagnostics::record("overlay.error", &error);
+                    next_attempt = now + Duration::from_millis(500);
                     continue;
                 }
+                notice_geometry = has_notice;
+            }
+            if !visible {
                 match set_hint_visible(&overlay, true) {
                     Ok(()) => {
                         visible = true;
                         let _ = handle.emit_to("overlay", "hint-show", ());
                     }
                     Err(error) => {
-                        let _ = handle.emit("app-error", error.to_string());
+                        crate::diagnostics::record("overlay.error", &error);
+                        next_attempt = now + Duration::from_millis(500);
+                        continue;
                     }
                 }
+            }
+            if changed {
+                let _ = handle.emit_to("overlay", "switch-notice", &presentation.notice);
+                last_notice = notice_id;
             }
         }
     });
@@ -383,7 +516,7 @@ fn set_hint_visible(overlay: &tauri::WebviewWindow, visible: bool) -> Result<(),
     }
 }
 
-fn position_hint(app: &AppHandle, config: &Config) -> Result<(), String> {
+fn position_hint(app: &AppHandle, config: &Config, notice: bool) -> Result<(), String> {
     let overlay = app.get_webview_window("overlay").ok_or("提示窗口不存在")?;
     let cursor = app.cursor_position().map_err(|error| error.to_string())?;
     let monitors = app
@@ -407,7 +540,12 @@ fn position_hint(app: &AppHandle, config: &Config) -> Result<(), String> {
         .iter()
         .filter(|app| !app.letter.is_empty())
         .count();
-    let (width, height) = crate::overlay_layout::size(
+    let layout = if notice {
+        crate::overlay_layout::notice_size
+    } else {
+        crate::overlay_layout::size
+    };
+    let (width, height) = layout(
         count,
         monitor.size().width,
         monitor.size().height,

@@ -30,3 +30,4 @@
 .scale-value{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .scale-option input[type=number]{width:55px}
 .scale-option button{white-space:nowrap;padding:5px 7px}
+.diagnostics #export-status{margin-bottom:0;overflow-wrap:anywhere}.diagnostics #export-status:empty{display:none}.diagnostics #logs-note{margin-bottom:0}.diagnostics button{white-space:nowrap}

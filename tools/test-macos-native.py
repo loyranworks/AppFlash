@@ -6,6 +6,7 @@ import pathlib
 import plistlib
 import select
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,29 @@ def stop(process):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+
+def busy_target_controls(helper, path, application):
+    startup_deadline = time.monotonic() + 5
+    while True:
+        initial = request(helper, {"command": "snapshot", "path": str(path)})
+        if len(initial.get("data", {}).get("windows", [])) == 2 or time.monotonic() >= startup_deadline:
+            break
+        time.sleep(0.05)
+    assert len(initial.get("data", {}).get("windows", [])) == 2, initial
+    application.send_signal(signal.SIGSTOP)
+    try:
+        began = time.monotonic()
+        reply = request(helper, {"command": "snapshot", "path": str(path)})
+        elapsed = time.monotonic() - began
+        assert elapsed < 0.75, {"elapsed": elapsed, "reply": reply}
+        assert "响应" in reply.get("error", ""), reply
+        assert "授权" not in reply["error"], "Busy is not an Accessibility authorization failure"
+    finally:
+        application.send_signal(signal.SIGCONT)
+    restored = request(helper, {"command": "snapshot", "path": str(path)})
+    assert restored.get("data", {}).get("windows") == initial["data"]["windows"], restored
+    print("Paused target answered with busy in %.3fs; no false permission error; window identities retained after resume" % elapsed, flush=True)
 
 
 def cold_fullscreen_controls(helper, path, application, root):
@@ -284,9 +308,10 @@ def main():
     native = pathlib.Path(sys.argv[1]).resolve()
     self_hide_probe = "--self-hide-probe" in sys.argv[2:]
     cold_fullscreen = "--cold-fullscreen" in sys.argv[2:]
+    busy_target = "--busy-target" in sys.argv[2:]
     fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe or cold_fullscreen
     check_space = "--check-space" in sys.argv[2:]
-    control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space
+    control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space or busy_target
     with tempfile.TemporaryDirectory(prefix="appflash-native-test-") as temporary:
         root = pathlib.Path(temporary)
         fixture_id = uuid.uuid4().hex
@@ -407,7 +432,25 @@ if let statePath = statePath {
         subprocess.run(["swiftc", str(source), "-o", str(executable)], check=True)
         helper = None
         application = None
+        departure = None
         try:
+            if fullscreen:
+                # Keep focus-changing tests inside disposable fixtures. The
+                # destination must be a distinct app with a real desktop window.
+                destination = root / "AppFlash Departure Fixture.app"
+                destination_executable = destination / "Contents/MacOS/departure"
+                destination_executable.parent.mkdir(parents=True)
+                shutil.copy2(executable, destination_executable)
+                with (destination / "Contents/Info.plist").open("wb") as stream:
+                    plistlib.dump({
+                        "CFBundleIdentifier": "local.appflash.departure-test." + fixture_id,
+                        "CFBundleExecutable": "departure",
+                        "CFBundleName": "AppFlash Departure Fixture",
+                        "CFBundlePackageType": "APPL",
+                    }, stream)
+                departure = subprocess.Popen([str(destination_executable), "--windows"],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(0.3)
             helper = subprocess.Popen([str(native)], stdin=subprocess.PIPE,
                                       stdout=subprocess.PIPE, text=True, bufsize=1)
             assert not listed(helper, fixture.resolve())
@@ -419,7 +462,9 @@ if let statePath = statePath {
                                            stderr=subprocess.DEVNULL, env=environment)
             wait_listed(helper, fixture.resolve(), True)
             if control_windows:
-                if cold_fullscreen:
+                if busy_target:
+                    busy_target_controls(helper, fixture.resolve(), application)
+                elif cold_fullscreen:
                     cold_fullscreen_controls(helper, fixture.resolve(), application, root)
                 else:
                     window_controls(helper, fixture.resolve(), application, root, fullscreen, check_space, self_hide_probe)
@@ -429,7 +474,7 @@ if let statePath = statePath {
             helper.stdin.close()
             assert helper.wait(timeout=5) == 0, "Helper did not exit cleanly on stdin EOF"
             print("Native IPC, live application launch/exit updates and EOF shutdown passed")
-            if control_windows and not cold_fullscreen:
+            if control_windows and not cold_fullscreen and not busy_target:
                 print("Two-window exact activation, batch collapse and restoration passed")
             if fullscreen and not cold_fullscreen:
                 print("Full-screen exact AX focus, hide/unhide and preservation passed")
@@ -438,6 +483,7 @@ if let statePath = statePath {
         finally:
             stop(application)
             stop(helper)
+            stop(departure)
 
 
 if __name__ == "__main__":

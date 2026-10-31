@@ -231,6 +231,23 @@ byId('autostart').addEventListener('change', async () => {
   input.disabled = false;
 });
 
+async function exportLogs() {
+  const button = byId('export-logs');
+  const status = byId('export-status');
+  if (button.disabled) return;
+  button.disabled = true;
+  status.className = 'footnote';
+  message(status, '正在导出日志…');
+  try {
+    const path = await invoke('export_logs');
+    message(status, path ? '已导出到 {path}' : '', { path });
+  } catch (error) {
+    status.className = 'error';
+    errorMessage(status, error);
+  } finally { button.disabled = false; }
+}
+byId('export-logs').addEventListener('click', exportLogs);
+
 initializeNavigation(); translatePage();
 byId('language').addEventListener('change', async () => {
   const previous = getLanguage();

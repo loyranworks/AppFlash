@@ -1,4 +1,10 @@
 export const english = {
+  '暂时无法切换': 'Unable to switch',
+  '诊断日志': 'Diagnostic logs', '导出 TXT': 'Export TXT',
+  '本地保存最近 7 天，每天最多 2 MB。': 'Saved locally for the last 7 days, up to 2 MB per day.',
+  '正在导出日志…': 'Exporting logs…', '已导出到 {path}': 'Exported to {path}',
+  '诊断日志暂不可用，请稍后重试。': 'Diagnostic logs are temporarily unavailable. Try again shortly.',
+
   '落雁工作室': 'loyran works.',
   '巧思成形，琢而至美。': 'Make Ideas Work Beautifully',
   '界面语言 / Language': '界面语言 / Language',
@@ -62,6 +68,13 @@ export const english = {
 };
 
 const nativeErrors = {
+  '此窗口不能导出日志。': 'This window cannot export logs.',
+  '无法读取导出位置：': 'Cannot read export location: ',
+  '导出任务未完成：': 'Log export did not complete: ',
+  '导出日志失败：': 'Log export failed: ',
+  '目标应用暂时没有响应，请在桌面切换完成后重试。': 'The target app is temporarily unresponsive. Try again after the desktop switch finishes.',
+  '未能切离目标全屏桌面；请保持另一个应用窗口可用后重试，目标应用尚未收起。': 'Could not leave the target fullscreen desktop. Keep another app window available and try again. The target app is still open.',
+
   '尚未发布可用版本，或更新清单暂不可用。': 'No published release is available, or the update manifest is temporarily unavailable.',
   '不支持此配置版本；原文件未修改': 'Unsupported configuration version; original file unchanged',
   '语言必须是 zh-CN 或 en': 'Language must be zh-CN or en',

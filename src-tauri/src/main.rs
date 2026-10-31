@@ -1,12 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod bindings;
 mod config;
+mod diagnostics;
 mod icon;
 #[cfg(target_os = "macos")]
 mod macos_cycle;
 #[cfg(target_os = "macos")]
+mod macos_input;
+#[cfg(target_os = "macos")]
 mod macos_overlay;
 mod overlay_layout;
+mod overlay_notice;
 mod platform;
 mod runtime;
 mod switching;
@@ -14,7 +18,51 @@ mod updates;
 use std::sync::{atomic::Ordering, Arc};
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::ShortcutState;
+
+#[tauri::command]
+async fn export_logs(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    if window.label() != "settings" {
+        return Err("此窗口不能导出日志。".into());
+    }
+    let english = app
+        .state::<Arc<runtime::Runtime>>()
+        .data
+        .lock()
+        .unwrap()
+        .config
+        .language
+        == "en";
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title(if english {
+                "Export diagnostics"
+            } else {
+                "导出诊断日志"
+            })
+            .set_file_name("AppFlash-diagnostics.txt")
+            .add_filter("Text", &["txt"])
+            .blocking_save_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected
+            .into_path()
+            .map_err(|error| format!("无法读取导出位置：{error}"))?;
+        diagnostics::export(&path).map_err(|error| format!("导出日志失败：{error}"))?;
+        diagnostics::record("export", "TXT diagnostics exported");
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| format!("导出任务未完成：{error}"))?
+}
 
 #[tauri::command]
 fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
@@ -227,6 +275,7 @@ fn show_settings(app: &tauri::AppHandle) {
 
 fn main() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::PendingUpdate::new(None))
         .plugin(tauri_plugin_autostart::init(
@@ -250,6 +299,7 @@ fn main() {
             request_access,
             get_autostart,
             set_autostart,
+            export_logs,
             updates::check_update,
             updates::install_update
         ])

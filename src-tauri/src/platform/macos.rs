@@ -7,6 +7,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Mutex, OnceLock},
+    time::Instant,
 };
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -48,11 +49,23 @@ fn start_helper() -> Result<Helper, String> {
             .map_err(|error| error.to_string())?;
     }
     let mut child = Command::new(path)
+        .env("APPFLASH_TRACE_WINDOW_CONTROL", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
+    if let Some(stderr) = child.stderr.take() {
+        let tracing = std::env::var_os("APPFLASH_TRACE_WINDOW_CONTROL").is_some();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                crate::diagnostics::record("native", &line);
+                if tracing {
+                    eprintln!("{line}");
+                }
+            }
+        });
+    }
     Ok(Helper {
         input: child.stdin.take().unwrap(),
         output: BufReader::new(child.stdout.take().unwrap()),
@@ -61,9 +74,22 @@ fn start_helper() -> Result<Helper, String> {
 }
 
 fn request(value: Value) -> Result<Value, String> {
+    let tracing = std::env::var_os("APPFLASH_TRACE_WINDOW_CONTROL").is_some();
+    let began = Instant::now();
     let mut slot = HELPER.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let lock_wait = began.elapsed();
+    if tracing {
+        eprintln!("TRACE native lock {:.3}s", began.elapsed().as_secs_f64());
+    }
     if slot.is_none() {
         *slot = Some(start_helper()?);
+        crate::diagnostics::record(
+            "native.startup",
+            &format!("elapsed_ms={}", began.elapsed().as_millis()),
+        );
+        if tracing {
+            eprintln!("TRACE native startup {:.3}s", began.elapsed().as_secs_f64());
+        }
     }
     let helper = slot.as_mut().unwrap();
     let result = (|| {
@@ -90,6 +116,23 @@ fn request(value: Value) -> Result<Value, String> {
     })();
     if result.is_err() && helper._child.try_wait().ok().flatten().is_some() {
         *slot = None;
+    }
+    crate::diagnostics::record(
+        "native.command",
+        &format!(
+            "command={} elapsed_ms={} lock_wait_ms={} ok={}",
+            value["command"].as_str().unwrap_or("unknown"),
+            began.elapsed().as_millis(),
+            lock_wait.as_millis(),
+            result.is_ok()
+        ),
+    );
+    if tracing {
+        eprintln!(
+            "TRACE native command {} {:.3}s",
+            value["command"].as_str().unwrap_or("unknown"),
+            began.elapsed().as_secs_f64()
+        );
     }
     result
 }

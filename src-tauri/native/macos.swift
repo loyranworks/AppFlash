@@ -6,10 +6,15 @@ struct NativeFailure: Error { let message: String }
 struct StoredWindow { let element: AXUIElement; let app: NSRunningApplication; let minimized: Bool }
 var stored: [UInt64: StoredWindow] = [:]
 var nextID: UInt64 = 1
+let traceWindowControl = ProcessInfo.processInfo.environment["APPFLASH_TRACE_WINDOW_CONTROL"] != nil
 
 func readAttribute(_ element: AXUIElement, _ key: String) -> (AXError, CFTypeRef?) {
+    let began = ProcessInfo.processInfo.systemUptime
     var value: CFTypeRef?
     let status = AXUIElementCopyAttributeValue(element, key as CFString, &value)
+    if traceWindowControl && ProcessInfo.processInfo.systemUptime - began > 0.05 {
+        FileHandle.standardError.write(Data("TRACE AX \(key) \(ProcessInfo.processInfo.systemUptime - began)s status=\(status.rawValue)\n".utf8))
+    }
     return (status, value)
 }
 
@@ -325,7 +330,9 @@ func requireAccess() throws {
 }
 
 func checkedSet(_ element: AXUIElement, _ key: String, _ value: CFTypeRef) throws {
-    if AXUIElementSetAttributeValue(element, key as CFString, value) != .success { throw NativeFailure(message: "目标应用不允许修改窗口状态。") }
+    let status = AXUIElementSetAttributeValue(element, key as CFString, value)
+    if status == .cannotComplete { throw NativeFailure(message: "目标应用暂时没有响应，请在桌面切换完成后重试。") }
+    if status != .success { throw NativeFailure(message: "目标应用不允许修改窗口状态。") }
 }
 
 func setHidden(_ app: NSRunningApplication, _ hidden: Bool, deadline suppliedDeadline: Date? = nil) throws {
@@ -367,6 +374,35 @@ func setHidden(_ app: NSRunningApplication, _ hidden: Bool, deadline suppliedDea
     }
 }
 
+var lastDepartureWindow: StoredWindow?
+
+func departureWindowIsEligible(_ window: StoredWindow, deadline: Date) -> Bool {
+    guard Date() < deadline, !window.app.isTerminated, !window.app.isHidden,
+          attribute(AXUIElementCreateApplication(window.app.processIdentifier), kAXHiddenAttribute) as? Bool == false,
+          Date() < deadline, attribute(window.element, kAXRoleAttribute) as? String == kAXWindowRole,
+          Date() < deadline, attribute(window.element, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole,
+          Date() < deadline, attribute(window.element, kAXMinimizedAttribute) as? Bool == false else { return false }
+    return true
+}
+
+func departureWindows(_ app: NSRunningApplication, deadline: Date) -> [StoredWindow] {
+    guard Date() < deadline else { return [] }
+    let application = AXUIElementCreateApplication(app.processIdentifier)
+    var roots = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    for key in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] where Date() < deadline {
+        if let value = attribute(application, key), CFGetTypeID(value) == AXUIElementGetTypeID() {
+            roots.append(unsafeBitCast(value, to: AXUIElement.self))
+        }
+    }
+    var result: [StoredWindow] = []
+    for root in roots where Date() < deadline {
+        if result.contains(where: { CFEqual($0.element, root) }) { continue }
+        let window = StoredWindow(element: root, app: app, minimized: false)
+        if departureWindowIsEligible(window, deadline: deadline) { result.append(window) }
+    }
+    return result
+}
+
 func prepareToHide(_ app: NSRunningApplication, windows: [StoredWindow], deadline: Date) throws {
     let appWindows = windows.filter { $0.app.processIdentifier == app.processIdentifier }
     let fullScreen = appWindows.filter { attribute($0.element, "AXFullScreen") as? Bool == true }
@@ -377,20 +413,45 @@ func prepareToHide(_ app: NSRunningApplication, windows: [StoredWindow], deadlin
         attribute(source, kAXFrontmostAttribute) as? Bool == false && fullScreen.allSatisfy { discovery.isOnscreen($0.element) == false }
     }
     if sourceIsAway() { return }
-    // First transfer activation to a different already running application,
-    // even if this app also has an ordinary window. Merely selecting its own
-    // ordinary window leaves it frontmost and did not permit hiding full screen.
-    // Only an already running Finder is used. Never launch a window, exit full
-    // screen, move a window, or alter the user's desktop preferences.
-    guard let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" && !$0.isTerminated && $0.processIdentifier != app.processIdentifier }) else {
-        throw NativeFailure(message: "Finder 未运行，无法安全切离全屏桌面并隐藏目标应用")
+    // Activating Finder without a real window can leave its menu bar active ON
+    // the source's fullscreen Space. Raise a verified window in another running
+    // app instead. Never launch, unminimize a destination, exit fullscreen, move
+    // windows, or change desktop preferences. A successful destination is cached.
+    var attempted: [AXUIElement] = []
+    func tryDestination(_ window: StoredWindow) -> Bool {
+        let attemptDeadline = min(deadline, Date(timeIntervalSinceNow: 0.7))
+        guard window.app.processIdentifier != app.processIdentifier,
+              !attempted.contains(where: { CFEqual($0, window.element) }),
+              departureWindowIsEligible(window, deadline: attemptDeadline) else { return false }
+        attempted.append(window.element)
+        do { try activate(window, deadline: attemptDeadline) } catch { return false }
+        while Date() < attemptDeadline {
+            if hasExactFocus(window, deadline: attemptDeadline) && sourceIsAway() {
+                lastDepartureWindow = window
+                return true
+            }
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+        }
+        return false
     }
-    let destination = AXUIElementCreateApplication(finder.processIdentifier)
-    _ = finder.activate(options: [])
-    while !(attribute(destination, kAXFrontmostAttribute) as? Bool == true && sourceIsAway()) {
-        if Date() >= deadline { throw NativeFailure(message: "系统未能激活已运行的 Finder 并切离目标全屏桌面，应用尚未收起") }
-        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    if let cached = lastDepartureWindow {
+        if tryDestination(cached) { return }
+        lastDepartureWindow = nil
     }
+    let apps = NSWorkspace.shared.runningApplications.filter {
+        $0.activationPolicy == .regular && !$0.isTerminated && !$0.isHidden && $0.processIdentifier != app.processIdentifier
+    }.sorted {
+        let leftFinder = $0.bundleIdentifier == "com.apple.finder"
+        let rightFinder = $1.bundleIdentifier == "com.apple.finder"
+        if leftFinder != rightFinder { return leftFinder }
+        return ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast)
+    }
+    for destination in apps where Date() < deadline {
+        for window in departureWindows(destination, deadline: deadline) where Date() < deadline {
+            if tryDestination(window) { return }
+        }
+    }
+    throw NativeFailure(message: "未能切离目标全屏桌面；请保持另一个应用窗口可用后重试，目标应用尚未收起。")
 }
 
 func collapse(_ windows: [StoredWindow]) throws {
@@ -421,35 +482,46 @@ func collapse(_ windows: [StoredWindow]) throws {
     }
 }
 
-func hasExactFocus(_ window: StoredWindow) -> Bool {
+func hasExactFocus(_ window: StoredWindow, deadline: Date) -> Bool {
     let system = AXUIElementCreateSystemWide()
-    guard let focusedApp = attribute(system, kAXFocusedApplicationAttribute),
+    guard Date() < deadline,
+          let focusedApp = attribute(system, kAXFocusedApplicationAttribute),
           CFGetTypeID(focusedApp) == AXUIElementGetTypeID() else { return false }
     let application = unsafeBitCast(focusedApp, to: AXUIElement.self)
     var pid: pid_t = 0
     guard AXUIElementGetPid(application, &pid) == .success,
-          pid == window.app.processIdentifier,
+          pid == window.app.processIdentifier, Date() < deadline,
           let focusedWindow = attribute(application, kAXFocusedWindowAttribute) else { return false }
     return CFEqual(focusedWindow, window.element)
 }
 
 func activate(_ window: StoredWindow, deadline suppliedDeadline: Date? = nil) throws {
+    let deadline = suppliedDeadline ?? Date(timeIntervalSinceNow: 1.2)
+    func requireTime() throws {
+        if Date() >= deadline { throw NativeFailure(message: "系统未将焦点切换到目标窗口（可能位于其他桌面）") }
+    }
+    try requireTime()
     // Full-screen windows often reject AXMinimized writes, even false -> false.
     if attribute(window.element, kAXMinimizedAttribute) as? Bool == true {
         try checkedSet(window.element, kAXMinimizedAttribute, kCFBooleanFalse)
     }
-    try setHidden(window.app, false, deadline: suppliedDeadline)
+    try requireTime()
+    try setHidden(window.app, false, deadline: deadline)
+    try requireTime()
     _ = window.app.activate(options: [])
     let application = AXUIElementCreateApplication(window.app.processIdentifier)
     _ = AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+    try requireTime()
     _ = AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute as CFString, window.element)
+    try requireTime()
     _ = AXUIElementSetAttributeValue(window.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     // AXMain success only designates the main window; always raise the exact AX
     // reference, then require both the focused application and focused window.
+    try requireTime()
     _ = AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
-    let deadline = suppliedDeadline ?? Date(timeIntervalSinceNow: 1.2)
-    while !hasExactFocus(window) {
-        if Date() >= deadline { throw NativeFailure(message: "系统未将焦点切换到目标窗口（可能位于其他桌面）") }
+    while true {
+        try requireTime()
+        if hasExactFocus(window, deadline: deadline) { return }
         // AppKit's activation state and Space transitions need the main runloop.
         // Do not block it by polling cached NSRunningApplication.isActive.
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
@@ -458,6 +530,10 @@ func activate(_ window: StoredWindow, deadline suppliedDeadline: Date? = nil) th
 
 func handle(_ request: [String: Any]) throws -> Any {
     let command = request["command"] as? String ?? ""
+    let began = ProcessInfo.processInfo.systemUptime
+    defer {
+        if traceWindowControl { FileHandle.standardError.write(Data("TRACE handler \(command) \(ProcessInfo.processInfo.systemUptime - began)s\n".utf8)) }
+    }
     if command == "access" {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
@@ -499,6 +575,7 @@ func handle(_ request: [String: Any]) throws -> Any {
             let element = AXUIElementCreateApplication(app.processIdentifier)
             let cached = stored.filter { $0.value.app.processIdentifier == app.processIdentifier }
             let (listStatus, listValue) = readAttribute(element, kAXWindowsAttribute)
+            if listStatus == .cannotComplete { throw NativeFailure(message: "目标应用暂时没有响应，请在桌面切换完成后重试。") }
             guard let published = listValue as? [AXUIElement], listStatus == .success else {
                 throw NativeFailure(message: "无法读取目标应用窗口（AX错误 \(listStatus.rawValue)）；请检查辅助功能授权。")
             }
@@ -583,6 +660,10 @@ func handle(_ request: [String: Any]) throws -> Any {
 
 let helperApp = NSApplication.shared
 helperApp.setActivationPolicy(.prohibited)
+// Applies only to this helper process. Per-element discovery probes restore 0,
+// which means this bounded global timeout, not the OS's much longer default.
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.25)
+if traceWindowControl { FileHandle.standardError.write(Data("TRACE system \(ProcessInfo.processInfo.operatingSystemVersionString)\n".utf8)) }
 // NSWorkspace refreshes application state on the main run loop. Read stdin off
 // that thread, but serialize AppKit and accessibility work on the main thread.
 DispatchQueue.global(qos: .userInitiated).async {
