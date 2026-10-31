@@ -1,10 +1,20 @@
 # AppFlash 验证记录
 
+## 2026-10-31 v0.1.7 正式发布验收
+
+源码提交 `ecba0cc051a1e7f3b40dbcccac148d7c114cf7a8` 与 `v0.1.7` 标签已原子推送。GitHub Actions [41181227266](https://github.com/loyranworks/AppFlash/actions/runs/41181227266) 第一次运行即完成 prepare、Windows x64、macOS ARM、macOS Intel 和 publish，全部成功。两个 macOS 构建的严格签名门禁均通过。
+
+[正式 Release](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.7) 于 2026-10-31 07:44:49 UTC 发布，已成为 latest，非草稿、非预发布；发布说明包含实际验证范围。全部 9 个附件均已匿名下载，SHA-256 与 GitHub 元数据一致。公开 `latest.json` 版本为 0.1.7，三平台地址指向本标签的公开附件，签名文本与相应 `.sig` 一致。三个更新包均通过客户端原公钥验签、签名版本和篡改字节拒绝检查。
+
+两个 macOS 更新归档内应用均为 0.1.7，架构分别为 arm64 与 x86_64，完整应用包严格签名校验通过；两个 DMG 的 `hdiutil verify` 均通过。Apple Silicon DMG SHA-256：`f391d060a4d386e185545e54cdd8b5f6f4d752f19eaf38a8b85d4d21df570cbf`；Intel DMG：`084736ec5ef33fe267aeec4f8b8726cfbb57defba38bacf4170fcf41efe1aee6`；Windows 安装器：`36f3c2feac404cfe13f3da9acc3194596bc90c923c0295d2f473176d2478dce8`。
+
+只发布并验收下载产物，未替换本机安装的 v0.1.6。真实全局快捷键端到端、MBP / Windows 实机以及客户端跨版本升级仍待验收。本机永久产物目录仅有两个历史版本，未清理已有文件。
+
 ## 2026-10-31 v0.1.7 发布前检查
 
 最终源码的 28 项 JavaScript 与 17 项 Rust 测试通过，版本一致性、Rust 格式和差异空白检查通过；本地 v0.1.7 正式候选应用的严格签名校验通过。首次沙盒测试受 Swift 全局模块缓存写入限制失败，获准在正常宿主环境重跑后完整通过，未绕过测试。已有 `updates.rs:100` 不可达代码告警仍存在。
 
-发版准备改为读取创建草稿响应中的 ID，已有草稿直接读取 `databaseId`。新增实际执行工作流 bash 的回归测试，模拟草稿列表尚未可见：旧脚本失败，新脚本对新建和已有草稿均通过。GitHub 三平台构建和正式发布结果待线上流程完成后记录。
+发版准备改为读取创建草稿响应中的 ID，已有草稿直接读取 `databaseId`。新增实际执行工作流 bash 的回归测试，模拟草稿列表尚未可见：旧脚本失败，新脚本对新建和已有草稿均通过。线上结果见本页正式发布验收记录。
 
 ## 2026-10-31 平台前缀标签
 
