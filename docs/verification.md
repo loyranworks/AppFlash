@@ -6,6 +6,8 @@
 
 修复逻辑在本机源码构建的调试应用中完成 GUI 验收：首次启动显示设置、关闭后 Finder 重开恢复、最小化后 Finder 重开恢复。`--background` 冷启动日志确认没有调用显示窗口逻辑；测试工具查询应用会触发 `Reopen`，经临时生命周期日志区分后确认，诊断日志代码已移除。最终 v0.1.6 源码的 25 项 JavaScript 和 16 项 Rust 测试通过，格式和发布版本检查通过；已有 `updates.rs:100` 不可达代码编译告警仍存在，与本次窗口逻辑无关。只读代码审查未发现阻断风险。
 
+正式优化版 v0.1.6 `.app` 已在本机从源码编译、完成 ad-hoc 签名，并实机确认首次显示及关闭后 Finder 重开恢复窗口。Tauri 的本地 DMG 流程停在 Finder AppleScript 布局步骤，结束该子进程后，改用 HFS+ 简单封装已编译应用，交付 `../artifacts/AppFlash_0.1.6_aarch64.dmg`。最终 DMG 完整性校验通过，重新只读挂载后确认版本为 0.1.6、架构为 arm64、完整应用包严格签名校验通过；SHA-256 为 `325d97db22df82ac3026dbda8e1275b7f62b961b2b84cfcf4a90e50d63290992`。本地构建仅禁用当前包的 updater 归档生成，未改动正式配置或更新公钥。源码提交 `4ccb984` 和 `v0.1.6` 标签已推送，GitHub Actions 41169580197 在复用已有草稿后进入三个平台构建。
+
 ## 2026-10-31 macOS ARM 签名修复
 
 官方 v0.1.4 Apple Silicon DMG 与更新归档的 SHA-256 均与 GitHub Release 一致，DMG 内部校验通过。ARM 应用只有 linker ad-hoc 签名，完整应用包的严格校验报 `code has no resources but signature indicates they must be present`；同版本 Intel 应用完全未签名。对 ARM 应用补全 ad-hoc 签名后，`codesign --verify --deep --strict` 通过；`syspolicy_check distribution` 的代码签名错误消失，仍报告临时签名和缺少公证。
