@@ -1,5 +1,17 @@
 # AppFlash 验证记录
 
+## 2026-10-31 v0.1.11 正式发布验收
+
+源码提交 `26851a1003779169feb784f3cd3d8f38f0c9556f` 与标签已原子推送。[Actions 41208942940](https://github.com/loyranworks/AppFlash/actions/runs/41208942940) 的 prepare、Windows x64、macOS ARM / Intel 和 publish 全部成功。[正式 Release](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.11) 于 2026-10-31T14:21:36Z 发布，非草稿、非预发布，公开 latest 更新入口已为 0.1.11，说明已核对。
+
+九个正式附件匿名下载，大小和 SHA-256 均匹配 GitHub 元数据；三个平台清单签名与独立 `.sig` 一致。全部更新包通过客户端原公钥、签名版本及篡改字节拒绝校验。两个 macOS 更新归档及只读挂载的 DMG 应用均为正确版本/架构，严格签名、固定证书 pin、不含 cdhash 的稳定身份通过，镜像完整性通过，已卸载测试挂载。
+
+Apple Silicon DMG SHA-256：`e949f62c0ceec896a06e59a608debccf9c6fbf75f2ff2a794f11d67477ae4fd3`；Intel DMG：`1edba748ef019e9a5a0b0c1e400432b3e1ec586629afcaef4595110c453fe83d`；Windows 安装器：`f92554b1e88d1b11afc8ad1167d30c0d97226e81708b5234a3384048047f23e9`。
+
+公开 Apple Silicon 更新归档已原位安装到 `/Applications/AppFlash.app`，未重新授予辅助功能权限。正式包经真实组合键再次通过单窗口三轮最小化/恢复、三窗口三轮逐窗置前后全部最小化、全屏冷启动首按、混合普通/全屏两轮及仅全屏单窗三轮隐藏/恢复。连续八次按键遇到暂停的自有应用时，松键后没有积压动作；随后新按键仍能完成访问所有窗口、隐藏及恢复，保留全屏。所有驱动恢复原配置，当前标准配置继续运行。
+
+贴边错误六秒到期/成功清除、全屏不抢焦点、普通提示关闭仍显示，以及原生导出/取消，见同一源码候选的发布前记录。没有直接控制 Codex，没有将 Mac mini 的独立窗口测试视为 MBP/Codex 或 Windows 实机结论。
+
 ## 2026-10-31 v0.1.11 发布前验收
 
 完整最终测试为 43 项 JavaScript、58 项 Rust，通过；版本一致性、Rust 格式与差异空白检查通过。固定证书签名候选严格校验通过，证书 SHA-256 仍为 `51100acc6e4f2d6e40e781618187b2f75b779ea6587d33c24f93002ee5f15a2f`。
