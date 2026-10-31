@@ -66,3 +66,8 @@ test('single prefixes save without generic warnings; system-key warnings remain'
   assert(shortcutWarnings(['Super'], 'windows').length > 0);
   assert.equal(shortcutWarnings(['Control', 'Alt'], 'windows').length, 0);
 });
+
+test('hint scale accepts whole percentages and rejects empty, fractional and out-of-range edits', () => {
+  for (const [input, expected] of [['50', 50], ['80', 80], [100, 100], ['150', 150]]) assert.equal(model.normalizeHintScale(input), expected);
+  for (const input of ['', ' ', '80.5', '49', '151', 'bad', Infinity]) assert.throws(() => model.normalizeHintScale(input));
+});

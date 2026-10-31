@@ -48,13 +48,15 @@ Click an app or its circular letter badge to edit. Adding, deleting and reorderi
 | One foreground window | Press again to minimize; press once more to restore |
 | Multiple windows | Cycle in stable order, then minimize all target windows |
 
+On macOS, the currently foreground window counts as visited. Remaining windows come forward once each, then all collapse and a new round begins. Applications with full-screen windows hide instead of minimizing, preserving their full-screen Spaces. Switching visits the target window’s Space. Collapsing an app with full-screen windows first visits Finder’s Space, then hides the app.
+
 Repeated presses mean pressing and releasing the letter, not holding it for keyboard auto-repeat. Switching apps or closing target windows updates the cycle state. Windows matches full process paths. Launchers, UWP hosts, elevated apps and macOS Accessibility restrictions still require real-device testing.
 
 ## Edge hint
 
 Hidden normally. Hold the prefix for **500ms (0.5 seconds) by default** to reveal circular letters and real app icons. Release the prefix to hide. Fast switching never waits for the hint. Lines, slow flowing animation and target highlighting provide lightweight feedback without app-name labels.
 
-Choose enable / disable, delay (0–10 seconds), left / right edge, letter background color, and alphabetical or manual order. Set manual order with ↑ ↓ in Applications and save. Alphabetical display does not overwrite manual order. Native frosted glass falls back to translucency when unavailable. Large lists use compact sizing; multi-monitor and DPI behavior need validation.
+Choose enable / disable, delay (0–10 seconds), left / right edge, letter background color, and alphabetical or manual order. Set manual order with ↑ ↓ in Applications and save. Alphabetical display does not overwrite manual order. The whole hint scales from 50–150%, including its background, icons, spacing and lines; old configurations default to 100%. macOS 26+ uses native Clear Liquid Glass, with native frosted glass on older macOS. The spine, connectors and flowing highlights remain. The new default is studio Navy (#244b70); saved custom colors are retained. Large lists use compact sizing; multi-monitor and DPI behavior need validation.
 
 ## General settings
 
@@ -82,7 +84,7 @@ Install Node.js / npm, stable Rust and platform build tools. Windows requires MS
     npm run check
     npm run build
 
-Windows installers are produced in src-tauri/target/release/bundle/nsis/. Signed updater packages require the maintainer's signing key; consult the release instructions. Updater signatures are not OS code signing. macOS builds use an ad-hoc signature covering the complete app bundle and still require manual approval on first launch. Windows code signing and macOS Developer ID signing / notarization remain outstanding, so security warnings may appear.
+Windows installers are produced in src-tauri/target/release/bundle/nsis/. Signed updater packages require the maintainer's signing key; consult the release instructions. Updater signatures are not OS code signing. From 0.1.8, macOS builds sign the complete app bundle and native helper with one fixed self-signed certificate. First launch still requires manual approval. Migrating from the old ad-hoc identity requires adding Accessibility permission once; subsequent upgrades using the same certificate retain the identity. Windows code signing and macOS Developer ID signing / notarization remain outstanding, so security warnings may appear.
 
 ui/ contains framework-free Settings and hint UI. src-tauri/src/ contains configuration, transactional registration, window cycling and updates. Its platform/ implements Win32 and the native macOS Swift helper. design/ retains visual iterations.
 

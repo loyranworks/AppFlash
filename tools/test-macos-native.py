@@ -1,9 +1,11 @@
 """Exercise the real long-lived helper without requiring Accessibility access."""
 
 import json
+import os
 import pathlib
 import plistlib
 import select
+import signal
 import subprocess
 import sys
 import tempfile
@@ -45,9 +47,29 @@ def stop(process):
             process.wait(timeout=5)
 
 
-def window_controls(helper, path):
+def window_controls(helper, path, application, root, fullscreen=False, check_space=False, self_hide_probe=False):
+    state_file = root / "fixture-state.json"
+    identities = {}
+    normal_closed = False
+
     def snapshot():
         return request(helper, {"command": "snapshot", "path": str(path)})
+
+    def latest_fixture():
+        try:
+            return json.loads(state_file.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def fixture_state(check, label):
+        deadline = time.monotonic() + 8
+        last = None
+        while time.monotonic() < deadline:
+            last = latest_fixture()
+            if last is not None and check(last):
+                return last
+            time.sleep(0.05)
+        raise AssertionError("Fixture state did not converge (" + label + "): " + str(last))
 
     def wait_state(check):
         deadline = time.monotonic() + 5
@@ -58,50 +80,276 @@ def window_controls(helper, path):
             time.sleep(0.05)
         raise AssertionError("Window state did not converge: " + str(reply))
 
+    def activate(target, phase, index):
+        context = {
+            "phase": phase, "index": index, "target": target,
+            "expected_identifier": identities.get(target),
+            "before_snapshot": snapshot(), "before_fixture": latest_fixture(),
+        }
+        try:
+            context["reply"] = request(helper, {"command": "activate", "id": target})
+            assert context["reply"] == {"data": True}, "Native activate rejected the request"
+            wait_state(lambda state: state["active"] == target)
+            # A previous timer sample can still describe the old key window.
+            # Require one fixture observation after the helper response first.
+            previous_sample = (latest_fixture() or {}).get("sample", -1)
+            fixture_state(lambda state: state["sample"] > previous_sample, "fresh post-activation sample")
+            if target not in identities:
+                state = fixture_state(
+                    lambda state: state["active"] and sum(window["key"] for window in state["windows"]) == 1,
+                    "identify key window for native ID " + str(target),
+                )
+                identities[target] = next(window["identifier"] for window in state["windows"] if window["key"])
+                context["expected_identifier"] = identities[target]
+            if check_space:
+                expected = identities[target]
+                fixture_state(
+                    lambda state: state["active"] and not state["hidden"] and any(
+                        window["identifier"] == expected and window["key"] and window["on_active_space"]
+                        for window in state["windows"]
+                    ),
+                    "exact target key window on active Space: " + expected,
+                )
+        except Exception as error:
+            context["failure"] = str(error)
+            context["after_snapshot"] = snapshot()
+            context["after_fixture"] = latest_fixture()
+            raise AssertionError("Native activation failed: " + json.dumps(context, ensure_ascii=False, sort_keys=True)) from error
+        context["after_snapshot"] = snapshot()
+        context["after_fixture"] = latest_fixture()
+        print("Native activation: " + json.dumps(context, ensure_ascii=False, sort_keys=True), flush=True)
+
     state = wait_state(lambda state: len(state["windows"]) == 2)
+    initial = fixture_state(lambda state: state["launched"] and len(state["windows"]) == 2, "fixture startup after applicationDidFinishLaunching")
+    assert not initial["fullscreen"] and initial["fullscreen_phase"] == "windowed" and all(not window["fullscreen"] for window in initial["windows"]), "Fixture restored an unexpected full-screen window: " + json.dumps(initial, ensure_ascii=False, sort_keys=True)
+    assert initial["app_window_count"] == 2, "Fixture restored extra untracked windows: " + json.dumps(initial, ensure_ascii=False, sort_keys=True)
+    print("Native initial fixture: " + json.dumps(initial, ensure_ascii=False, sort_keys=True), flush=True)
     ids = [window["id"] for window in state["windows"]]
-    for target in ids + [ids[0]]:
-        assert request(helper, {"command": "activate", "id": target}) == {"data": True}
-        wait_state(lambda state: state["active"] == target)
-    for target in ids:
-        assert request(helper, {"command": "minimize", "id": target}) == {"data": True}
+    for index, target in enumerate(ids + [ids[0]]):
+        activate(target, "ordinary", index)
+    assert len(set(identities.values())) == len(ids), "Native IDs did not identify distinct fixture windows: " + str(identities)
+    reply = request(helper, {"command": "collapse", "ids": ids})
+    assert reply == {"data": True}, {"phase": "ordinary-collapse", "reply": reply, "fixture": latest_fixture()}
     wait_state(lambda state: len(state["windows"]) == 2 and all(w["minimized"] for w in state["windows"]))
-    for target in ids:
-        assert request(helper, {"command": "activate", "id": target}) == {"data": True}
-        wait_state(lambda state: state["active"] == target and any(w["id"] == target and not w["minimized"] for w in state["windows"]))
+    for index, target in enumerate(ids):
+        activate(target, "ordinary-restore", index)
+        wait_state(lambda state: any(w["id"] == target and not w["minimized"] for w in state["windows"]))
+
+    if fullscreen:
+        application.send_signal(signal.SIGUSR1)
+        entered = fixture_state(lambda state: state["fullscreen_phase"] == "entered" and state["fullscreen"], "windowDidEnterFullScreen")
+        # A second fresh helper has no cached AX references. Probe before any
+        # warm-helper action changes Space, and report this independent result
+        # even if the subsequent activation check fails first.
+        cold = subprocess.Popen(helper.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+        try:
+            cold_reply = None
+            cold_deadline = time.monotonic() + 3
+            while time.monotonic() < cold_deadline:
+                cold_reply = request(cold, {"command": "snapshot", "path": str(path)})
+                if len(cold_reply.get("data", {}).get("windows", [])) == len(entered["windows"]):
+                    break
+                time.sleep(0.1)
+            cold_context = {"phase": "cold-start-fullscreen", "reply": cold_reply, "fixture": latest_fixture(), "expected_window_count": len(entered["windows"])}
+            print("Native cold-start enumeration: " + json.dumps(cold_context, ensure_ascii=False, sort_keys=True), flush=True)
+        finally:
+            stop(cold)
+        for index, target in enumerate(ids + [ids[0]]):
+            activate(target, "fullscreen-cross-space", index)
+            fixture_state(lambda state: state["fullscreen_phase"] == "entered" and state["fullscreen"], "full-screen preservation")
+        fullscreen_id = next(id for id, identifier in identities.items() if identifier == "appflash-test-0")
+        activate(fullscreen_id, "fullscreen-before-collapse", 0)
+        if self_hide_probe:
+            before_probe = latest_fixture()
+            expected_requests = before_probe["self_hide_requests"] + 1
+            application.send_signal(signal.SIGWINCH)
+            probe_deadline = time.monotonic() + 2
+            after_probe = before_probe
+            while time.monotonic() < probe_deadline:
+                after_probe = latest_fixture()
+                if after_probe is not None and after_probe["self_hide_requests"] >= expected_requests and after_probe["hidden"]:
+                    break
+                time.sleep(0.05)
+            probe_context = {"phase": "fixture-self-hide-from-fullscreen", "before_fixture": before_probe, "after_fixture": after_probe, "snapshot": snapshot()}
+            print("Native fixture self-hide probe: " + json.dumps(probe_context, ensure_ascii=False, sort_keys=True), flush=True)
+            assert after_probe is not None and after_probe["self_hide_requests"] >= expected_requests and after_probe["hidden"] and after_probe["fullscreen"], "Fixture NSApp.hide(nil) did not hide while preserving full screen: " + json.dumps(probe_context, ensure_ascii=False, sort_keys=True)
+            activate(fullscreen_id, "fixture-self-hide-restore", 0)
+            fixture_state(lambda state: not state["hidden"] and state["fullscreen"], "restore after fixture self-hide")
+        reply = request(helper, {"command": "collapse", "ids": ids})
+        assert reply == {"data": True}, {"phase": "fullscreen-collapse", "reply": reply, "fixture": latest_fixture()}
+        fixture_state(lambda state: state["hidden"] and state["fullscreen"], "full-screen application hide")
+        for index, target in enumerate(ids):
+            activate(target, "fullscreen-unhide", index)
+            fixture_state(lambda state: not state["hidden"] and state["fullscreen"], "full-screen application unhide")
+        # Close and release the ordinary window while its sibling remains full
+        # screen, then exercise the already-running Finder route for all-FS apps.
+        normal_id = next(id for id, identifier in identities.items() if identifier == "appflash-test-1")
+        application.send_signal(signal.SIGUSR2)
+        fixture_state(lambda state: len(state["windows"]) == 1 and state["fullscreen"], "ordinary window closed while sibling stays full screen")
+        wait_state(lambda state: len(state["windows"]) == 1 and all(window["id"] != normal_id for window in state["windows"]))
+        normal_closed = True
+        activate(fullscreen_id, "fullscreen-only-before-collapse", 0)
+        collapse_deadline = time.monotonic() + 3
+        collapse_attempts = []
+        while True:
+            refreshed = snapshot()
+            reply = request(helper, {"command": "collapse", "ids": [fullscreen_id]})
+            collapse_attempts.append({"snapshot": refreshed, "reply": reply})
+            if reply == {"data": True}:
+                break
+            pending = str(reply.get("error", "")).startswith("仍在确认目标应用其他桌面的窗口")
+            if not pending or time.monotonic() >= collapse_deadline:
+                break
+            time.sleep(0.1)
+        if reply != {"data": True}:
+            expected_inventory = (latest_fixture() or {}).get("inventory_requests", 0) + 1
+            application.send_signal(signal.SIGINFO)
+            fixture_state(lambda state: state["inventory_requests"] >= expected_inventory, "capture exact own-PID CG inventory after pending retry")
+        print("Native full-screen-only collapse attempts: " + json.dumps({"attempts": collapse_attempts, "fixture": latest_fixture()}, ensure_ascii=False, sort_keys=True), flush=True)
+        assert reply == {"data": True}, {"phase": "fullscreen-only-collapse", "attempts": collapse_attempts, "fixture": latest_fixture()}
+        fixture_state(lambda state: state["hidden"] and state["fullscreen"], "full-screen-only application hide")
+        activate(fullscreen_id, "fullscreen-only-unhide", 0)
+        fixture_state(lambda state: not state["hidden"] and state["fullscreen"], "full-screen-only application unhide")
+        application.send_signal(signal.SIGUSR1)
+        fixture_state(lambda state: state["fullscreen_phase"] == "exited" and not state["fullscreen"], "windowDidExitFullScreen")
+
+    # A window omitted by AXWindows is kept while valid; closing and releasing
+    # the fixture's second NSWindow must still invalidate and remove its ID.
+    closed_id = next(id for id, identifier in identities.items() if identifier == "appflash-test-1")
+    if not normal_closed:
+        application.send_signal(signal.SIGUSR2)
+    closed_state = fixture_state(lambda state: len(state["windows"]) == 1, "closed fixture window released")
+    remaining = wait_state(lambda state: len(state["windows"]) == 1 and all(window["id"] != closed_id for window in state["windows"]))
+    closed_reply = request(helper, {"command": "activate", "id": closed_id})
+    assert "error" in closed_reply, {"phase": "closed-window", "target": closed_id, "reply": closed_reply, "snapshot": remaining, "fixture": closed_state}
+    print("Native closed-window cleanup: " + json.dumps({"closed_id": closed_id, "snapshot": remaining, "reply": closed_reply, "fixture": closed_state}, ensure_ascii=False, sort_keys=True), flush=True)
+    if fullscreen:
+        # Do not turn partial cold-start discovery into a passing full-screen
+        # test. Keep this after the warm-cache checks to expose both boundaries.
+        assert len(cold_reply.get("data", {}).get("windows", [])) == cold_context["expected_window_count"], "Cold-start full-screen enumeration incomplete: " + json.dumps(cold_context, ensure_ascii=False, sort_keys=True)
 
 
 def main():
     assert sys.platform == "darwin", "This test requires macOS"
     native = pathlib.Path(sys.argv[1]).resolve()
-    control_windows = "--window-control" in sys.argv[2:]
+    self_hide_probe = "--self-hide-probe" in sys.argv[2:]
+    fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe
+    check_space = "--check-space" in sys.argv[2:]
+    control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space
     with tempfile.TemporaryDirectory(prefix="appflash-native-test-") as temporary:
         root = pathlib.Path(temporary)
-        fixture = root / "AppFlash Native Fixture.app"
-        executable = fixture / "Contents/MacOS/fixture"
+        fixture_id = uuid.uuid4().hex
+        fixture_name = "AppFlash Native Fixture " + fixture_id
+        executable_name = "fixture-" + fixture_id
+        fixture = root / (fixture_name + ".app")
+        executable = fixture / "Contents/MacOS" / executable_name
         executable.parent.mkdir(parents=True)
         with (fixture / "Contents/Info.plist").open("wb") as stream:
             plistlib.dump({
-                "CFBundleIdentifier": "local.appflash.native-test." + uuid.uuid4().hex,
-                "CFBundleExecutable": "fixture",
-                "CFBundleName": "AppFlash Native Fixture",
+                "CFBundleIdentifier": "local.appflash.native-test." + fixture_id,
+                "CFBundleExecutable": executable_name,
+                "CFBundleName": fixture_name,
+                "CFBundleDisplayName": fixture_name,
                 "CFBundlePackageType": "APPL",
             }, stream)
         source = root / "fixture.swift"
         source.write_text("""import AppKit
+// Process-local defaults only: never inherit or write a user's restore setting.
+UserDefaults.standard.setVolatileDomain(["NSQuitAlwaysKeepsWindows": false], forName: UserDefaults.argumentDomain)
+final class FixtureDelegate: NSObject, NSApplicationDelegate {
+    var launched = false
+    func applicationDidFinishLaunching(_ notification: Notification) { launched = true }
+    func applicationShouldSaveSecureApplicationState(_ app: NSApplication) -> Bool { false }
+    func applicationShouldRestoreSecureApplicationState(_ app: NSApplication) -> Bool { false }
+}
 let app = NSApplication.shared
+let fixtureDelegate = FixtureDelegate()
+app.delegate = fixtureDelegate
 app.setActivationPolicy(.regular)
+let applicationName = ProcessInfo.processInfo.processName
+let mainMenu = NSMenu()
+let applicationMenuItem = NSMenuItem()
+let applicationMenu = NSMenu(title: applicationName)
+let hideItem = NSMenuItem(title: "Hide " + applicationName, action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+hideItem.target = app
+applicationMenu.addItem(hideItem)
+applicationMenu.addItem(NSMenuItem.separator())
+let quitItem = NSMenuItem(title: "Quit " + applicationName, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+quitItem.target = app
+applicationMenu.addItem(quitItem)
+applicationMenuItem.submenu = applicationMenu
+mainMenu.addItem(applicationMenuItem)
+app.mainMenu = mainMenu
 var windows: [NSWindow] = []
 if CommandLine.arguments.contains("--windows") {
     for index in 0..<2 {
         let window = NSWindow(contentRect: NSRect(x: 100 + index * 80, y: 100, width: 360, height: 200), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "AppFlash native test \\(index + 1)"
         window.identifier = NSUserInterfaceItemIdentifier("appflash-test-\\(index)")
+        window.collectionBehavior = [.fullScreenPrimary]
+        window.isReleasedWhenClosed = false
+        window.isRestorable = false
+        window.restorationClass = nil
         window.makeKeyAndOrderFront(nil)
         windows.append(window)
     }
 }
-app.run()
+let statePath = ProcessInfo.processInfo.environment["APPFLASH_FIXTURE_STATE"]
+if let statePath = statePath {
+    signal(SIGUSR1, SIG_IGN)
+    let signalSource = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+    signalSource.setEventHandler { windows.first?.toggleFullScreen(nil) }
+    signalSource.resume()
+    signal(SIGUSR2, SIG_IGN)
+    let closeSource = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
+    closeSource.setEventHandler {
+        if windows.count > 1 {
+            let closed = windows.removeLast()
+            closed.close()
+        }
+    }
+    closeSource.resume()
+    // SIGUSR3 does not exist on macOS. SIGWINCH is private to this fixture's
+    // test protocol and is sent only to its exact subprocess PID.
+    signal(SIGWINCH, SIG_IGN)
+    var selfHideRequests = 0
+    let selfHideSource = DispatchSource.makeSignalSource(signal: SIGWINCH, queue: .main)
+    selfHideSource.setEventHandler {
+        selfHideRequests += 1
+        app.hide(nil)
+    }
+    selfHideSource.resume()
+    // A failing pending-retry test can request one read-only WindowServer dump.
+    signal(SIGINFO, SIG_IGN)
+    var inventoryRequests = 0
+    var cgInventory: [[String: Any]] = []
+    let inventorySource = DispatchSource.makeSignalSource(signal: SIGINFO, queue: .main)
+    inventorySource.setEventHandler {
+        inventoryRequests += 1
+        let all = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        cgInventory = all.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == ProcessInfo.processInfo.processIdentifier }
+    }
+    inventorySource.resume()
+    var fullscreenPhase = "windowed"
+    var observers: [NSObjectProtocol] = []
+    for (name, phase) in [(NSWindow.willEnterFullScreenNotification, "entering"), (NSWindow.didEnterFullScreenNotification, "entered"), (NSWindow.willExitFullScreenNotification, "exiting"), (NSWindow.didExitFullScreenNotification, "exited")] {
+        observers.append(NotificationCenter.default.addObserver(forName: name, object: windows.first, queue: .main) { _ in fullscreenPhase = phase })
+    }
+    var sample = 0
+    let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+        sample += 1
+        let windowStates: [[String: Any]] = windows.map { window in
+            ["window_number": window.windowNumber, "identifier": window.identifier?.rawValue ?? "", "key": window.isKeyWindow, "main": window.isMainWindow, "on_active_space": window.isOnActiveSpace, "occlusion": window.occlusionState.rawValue, "occlusion_visible": window.occlusionState.contains(.visible), "fullscreen": window.styleMask.contains(.fullScreen), "minimized": window.isMiniaturized, "visible": window.isVisible]
+        }
+        let state: [String: Any] = ["sample": sample, "inventory_requests": inventoryRequests, "cg_inventory": cgInventory, "self_hide_requests": selfHideRequests, "launched": fixtureDelegate.launched, "app_window_count": app.windows.count, "fullscreen": windows.first?.styleMask.contains(.fullScreen) ?? false, "fullscreen_phase": fullscreenPhase, "active": app.isActive, "hidden": app.isHidden, "windows": windowStates]
+        if let data = try? JSONSerialization.data(withJSONObject: state) {
+            try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
+        }
+    }
+    withExtendedLifetime((signalSource, closeSource, selfHideSource, inventorySource, timer, observers)) { app.run() }
+} else {
+    app.run()
+}
 """)
         subprocess.run(["swiftc", str(source), "-o", str(executable)], check=True)
         helper = None
@@ -111,11 +359,14 @@ app.run()
                                       stdout=subprocess.PIPE, text=True, bufsize=1)
             assert not listed(helper, fixture.resolve())
             arguments = [str(executable)] + (["--windows"] if control_windows else [])
+            environment = dict(os.environ)
+            if control_windows:
+                environment["APPFLASH_FIXTURE_STATE"] = str(root / "fixture-state.json")
             application = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
-                                           stderr=subprocess.DEVNULL)
+                                           stderr=subprocess.DEVNULL, env=environment)
             wait_listed(helper, fixture.resolve(), True)
             if control_windows:
-                window_controls(helper, fixture.resolve())
+                window_controls(helper, fixture.resolve(), application, root, fullscreen, check_space, self_hide_probe)
             stop(application)
             wait_listed(helper, fixture.resolve(), False)
             assert "error" in request(helper, {"command": "not-a-command"})
@@ -123,7 +374,11 @@ app.run()
             assert helper.wait(timeout=5) == 0, "Helper did not exit cleanly on stdin EOF"
             print("Native IPC, live application launch/exit updates and EOF shutdown passed")
             if control_windows:
-                print("Two-window activation, minimization and restoration passed")
+                print("Two-window exact activation, batch collapse and restoration passed")
+            if fullscreen:
+                print("Full-screen exact AX focus, hide/unhide and preservation passed")
+            if check_space:
+                print("Exact fixture key window on active Space verified for every activation")
         finally:
             stop(application)
             stop(helper)

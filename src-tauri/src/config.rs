@@ -17,8 +17,14 @@ pub struct Hint {
     pub delay: f64,
     pub side: String,
     pub color: String,
+    #[serde(default = "default_hint_scale")]
+    pub scale: u16,
     #[serde(default = "manual_order")]
     pub order: String,
+}
+
+fn default_hint_scale() -> u16 {
+    100
 }
 
 fn manual_order() -> String {
@@ -50,7 +56,8 @@ impl Default for Config {
                 enabled: true,
                 delay: 0.5,
                 side: "right".into(),
-                color: "#587a6b".into(),
+                color: "#244b70".into(),
+                scale: default_hint_scale(),
                 order: manual_order(),
             },
             apps: Vec::new(),
@@ -92,6 +99,9 @@ impl Config {
         }
         if !self.hint.delay.is_finite() || !(0.0..=10.0).contains(&self.hint.delay) {
             return Err("提示延迟必须在 0–10 秒之间".into());
+        }
+        if !(50..=150).contains(&self.hint.scale) {
+            return Err("提示比例必须是 50–150 之间的整数百分比".into());
         }
         if !["left", "right"].contains(&self.hint.side.as_str()) {
             return Err("提示位置必须是 left 或 right".into());

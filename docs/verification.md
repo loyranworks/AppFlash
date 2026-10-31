@@ -108,3 +108,25 @@ Windows x64、macOS Apple Silicon / Intel 的 GitHub 构建成功。首次 publi
 ## 0.1.2 仓库迁移与远端验收（2026-10-30）
 
 仓库迁移至 loyranworks/AppFlash，Git remote、客户端 endpoint、发布脚本与双语 README 已同步。三平台线上构建成功。并发创建导致两个同标签草稿，本次合并附件并验证复制摘要一致后通过 CLI 发布；冗余 Intel 草稿改为 v0.1.2-build-intel 并保留，不对外发布。工作流已改为预先创建单一草稿并传递 Release ID；该新流程的下一次线上执行仍待验证。旧、新更新入口均匿名返回 200 / 0.1.2，三平台包匿名下载均返回 200，并通过原公钥、签名版本与篡改拒绝测试。未执行用户客户端安装、重启或长按 Prefix 实机验收。
+
+## 0.1.8 合并验收（2026-10-31）
+
+本机固定签名 A（0.1.7）→B（0.1.8）在同一 `/Applications/AppFlash.app` 测试。只为 A 移除旧条目并重新授权一次，B 没有改动辅助功能列表，真实全局 CGEvent 组合键仍成功激活、最小化和恢复计算器。主程序 SHA-256 不同，designated requirement 相同：`identifier "local.appflash.desktop" and certificate root = H"f00dc7f30609d86353fa08ac71ca68b53e78c9b5"`。固定公有证书校验通过；临时、异证书、被篡改代码的拒绝测试通过。
+
+首次合并自动测试为 35 项 JavaScript + 35 项 Rust 全通过；后续原生全屏诊断修复仍需最终重跑。设置页实际输入 80%，滑杆同步，确认保存后配置落盘 80%；原生贴边窗口实际为 96×96pt（100% 最小尺寸 120×120pt），右侧保持 12pt 留白。未以 WebView zoom 叠加第二次缩放。
+
+全屏原生验收增加真实 fixture 的 didEnter/didExit 通知、每窗原生 ID、isKeyWindow、isOnActiveSpace、fullScreen、minimized、hidden 状态；单独 AXFocusedWindow 成功不再作为实际桌面切换的充分证据。已复现 AXWindows/AXChildren 在全屏桌面省略其他桌面的正常窗口，有效缓存引用仍可读取。候选列表合并公开属性和有效缓存，并仅在精确 WindowServer ID 缺失时按需进行隔离的兼容发现。
+
+兼容发现使用可选私有符号，按精确 PID/CGWindowID、AXWindow 根和标准窗口条件匹配，无标题或位置猜测，无对象内存偏移读取。扫描有预算和限频；未确认完整窗口集合时禁止结束本轮收起，避免把部分发现当作全量。符号或应用不支持时可能提示重试，不能保证所有第三方窗口兼容。
+
+`dot-doctor` 已运行：既有未纳管配置和断链提示仍在；签名目录属于秘密存储，保持在 Git 之外，未自动纳入 dotfiles。
+
+后续强化验收：`tools/test-macos-native.py <helper> --fullscreen --check-space` 已通过两种从全屏前台直接收起场景：同时含普通窗口、关闭普通窗口后只剩全屏窗口。系统在全屏期间会拒绝直接 hide；实现先公开激活已运行的 Finder，确认目标全屏窗口离开当前 Space，再要求实际 AXHidden=true。恢复要求原全屏窗口重新成为 key 且在 active Space，fullScreen 始终为 true。关闭窗口对应的 AX 根失效后，系统 CG 库存仍可能保留该窗口，现按此前已验证根与会话唯一 CGWindowID 的精确关系排除离屏残留，不把未知窗口猜成已关闭。
+
+已安装 B 的真实全局组合键连续六次，验证两轮“窗口 1 / 窗口 2 / 全部最小化”；从实际全屏 fixture 通过 K 切到计算器，源窗口全屏保留。贴边首次实测发现普通 NSWindow 即使有跨全屏标志也未 on-screen；按设计升级为真实非激活 NSPanel，显示、焦点及比例由下一轮实机验收确认。
+
+最终 NSPanel 实机验收通过：在实际全屏 fixture 为 key、active Space 且前台不变时，按真实四修饰键前缀，WindowServer 明确将 AppFlash hint 面板标记为 on-screen；原 Tao 代理窗保持隐藏。80% 首次显示为 96×125pt，设置改为 150% 保存后为 180×234pt，右边距始终 12pt，中心位置保持；实际截图确认清透圆角材质、Navy 字母、主线与连接线。macOS 提示条底部修饰键改为原生 ⌃ ⌥ ⇧ ⌘ 符号。
+
+最终安装的 B 通过真实 Carbon 全局快捷键再跑两轮含全屏窗口的循环：普通窗与全屏窗各置前一次 → 整应用 hidden=true → 恢复并重复；每次全屏窗 key 与 active Space 一致，fullScreen 全程 true。没有为 B 重新授权。源码最终完整回归为 35 项 JavaScript + 37 项 Rust 全通过（另含 15 个原生分类断言）；固定证书 release app 构建与校验通过。测试过程中曾发现并修复原生句柄 placeholder 契约与 Tao/GCD 几何异步时序，最终尺寸检查覆盖了首次显示及比例变更。
+
+GitHub 三平台构建及公开发行产物待远端流程完成后记录。

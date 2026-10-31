@@ -1,4 +1,4 @@
-import { addImports, normalizeLetter, shortcutWarnings, moveApp, prefixKeyLabel } from './model.js';
+import { addImports, normalizeLetter, shortcutWarnings, moveApp, prefixKeyLabel, normalizeHintScale } from './model.js';
 import { badge, element, loadIcon } from './shared.js';
 import { initializeUpdates } from './updates.js';
 import { t, setLanguage, getLanguage, translatePage, message, errorMessage } from './i18n.js';
@@ -21,7 +21,7 @@ function updateTheme() {
   document.documentElement.style.setProperty('--accent', byId('letter-color').value);
   document.documentElement.style.setProperty('--brand-color', state.paused ? '#343840' : byId('letter-color').value);
   byId('color-value').textContent = byId('letter-color').value;
-  for (const id of ['hint-delay', 'hint-order']) byId(id).disabled = !byId('hint-enabled').checked;
+  for (const id of ['hint-delay', 'hint-order', 'hint-scale', 'hint-scale-range', 'reset-scale']) byId(id).disabled = !byId('hint-enabled').checked;
   for (const input of document.querySelectorAll('input[name=side]')) input.disabled = !byId('hint-enabled').checked;
   byId('shortcut-warning').textContent = shortcutWarnings(prefix(), state.platform).join(' ');
 }
@@ -66,11 +66,13 @@ function renderApps() {
 
 function renderState() {
   draft = structuredClone(state.config);
+  document.documentElement.classList.toggle('macos', state.platform === 'macos');
   setLanguage(draft.language); byId('language').value = draft.language; translatePage();
   for (const input of document.querySelectorAll('#prefix-options input')) input.checked = draft.prefix.includes(input.value);
   byId('hint-enabled').checked = draft.hint.enabled;
   byId('hint-delay').value = draft.hint.delay;
   byId('hint-order').value = draft.hint.order;
+  byId('hint-scale').value = byId('hint-scale-range').value = draft.hint.scale ?? 100;
   document.querySelector(`input[name=side][value=${draft.hint.side}]`).checked = true;
   byId('letter-color').value = draft.hint.color;
   for (const label of document.querySelectorAll('[data-prefix-key]')) label.textContent = prefixKeyLabel(label.dataset.prefixKey, state.platform);
@@ -170,7 +172,8 @@ function collectConfig() {
   if (!config.prefix.length) throw new Error(t('至少选择一个 Prefix 修饰键。'));
   const delay = Number(byId('hint-delay').value);
   if (byId('hint-delay').value === '' || !Number.isFinite(delay) || delay < 0 || delay > 10) throw new Error(t('出现延迟必须在 0–10 秒之间。'));
-  config.hint = { enabled: byId('hint-enabled').checked, delay, side: document.querySelector('input[name=side]:checked').value, color: byId('letter-color').value, order: byId('hint-order').value };
+  const scale = normalizeHintScale(byId('hint-scale').value);
+  config.hint = { scale, enabled: byId('hint-enabled').checked, delay, side: document.querySelector('input[name=side]:checked').value, color: byId('letter-color').value, order: byId('hint-order').value };
   return config;
 }
 
@@ -199,7 +202,18 @@ byId('pause').addEventListener('click', async () => {
 });
 byId('access').addEventListener('click', async () => { try { await invoke('request_access'); } catch (error) { showError(error); } });
 for (const input of document.querySelectorAll('#prefix-options input,#hint-enabled,#hint-delay,#hint-order,input[name=side],#letter-color')) input.addEventListener('input', () => { changed(); updateTheme(); });
-byId('reset-color').addEventListener('click', () => { byId('letter-color').value = '#587a6b'; changed(); updateTheme(); });
+byId('reset-color').addEventListener('click', () => { byId('letter-color').value = '#244b70'; changed(); updateTheme(); });
+
+function updateScale(input) {
+  try {
+    const scale = normalizeHintScale(input.value);
+    byId('hint-scale').value = byId('hint-scale-range').value = String(scale);
+  } catch { /* Keep incomplete number edits visible; saving validates them. */ }
+  changed();
+}
+byId('hint-scale').addEventListener('input', () => updateScale(byId('hint-scale')));
+byId('hint-scale-range').addEventListener('input', () => updateScale(byId('hint-scale-range')));
+byId('reset-scale').addEventListener('click', () => updateScale({ value: 100 }));
 
 byId('autostart').addEventListener('change', async () => {
   const input = byId('autostart');

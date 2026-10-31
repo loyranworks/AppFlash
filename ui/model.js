@@ -13,6 +13,12 @@ export function normalizeLetter(value) {
   return letter;
 }
 
+export function normalizeHintScale(value) {
+  const scale = Number(value);
+  if (String(value).trim() === '' || !Number.isInteger(scale) || scale < 50 || scale > 150) throw new Error(t('整体比例必须是 50–150 之间的整数百分比。'));
+  return scale;
+}
+
 export function addImports(apps, selected, platform, createId) {
   const key = path => platform === 'windows' ? path.replaceAll('/', '\\').toLowerCase() : path;
   const result = structuredClone(apps);

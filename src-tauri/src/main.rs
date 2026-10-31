@@ -2,6 +2,11 @@
 mod bindings;
 mod config;
 mod icon;
+#[cfg(target_os = "macos")]
+mod macos_cycle;
+#[cfg(target_os = "macos")]
+mod macos_overlay;
+mod overlay_layout;
 mod platform;
 mod runtime;
 mod switching;

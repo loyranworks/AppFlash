@@ -6,7 +6,8 @@ const nodes = new Map();
 const timers = new Map();
 
 function render(config) {
-  rail.className = `rail ${config.hint.side}`;
+  rail.className = `rail ${config.hint.side}${navigator.platform.includes('Mac') ? ' native-material' : ''}${rail.classList.contains('shown') ? ' shown' : ''}`;
+  document.documentElement.style.setProperty('--overlay-scale', String((config.hint.scale ?? 100) / 100));
   document.documentElement.style.setProperty('--accent', config.hint.color);
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear(); nodes.clear(); items.replaceChildren();
@@ -19,8 +20,9 @@ function render(config) {
     row.append(frame, badge(app.letter), element('span', 'tick'));
     items.append(row); nodes.set(app.id, row); loadIcon(image, app.path);
   }
-  const display = { Control: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: navigator.platform.includes('Mac') ? '⌘' : 'Win' };
-  document.getElementById('prefix').textContent = config.prefix.map(key => display[key]).join(' + ');
+  const mac = navigator.platform.includes('Mac');
+  const display = mac ? { Control: '⌃', Alt: '⌥', Shift: '⇧', Super: '⌘' } : { Control: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Win' };
+  document.getElementById('prefix').textContent = config.prefix.map(key => display[key]).join(mac ? ' ' : ' + ');
 }
 
 await window.__TAURI__.event.listen('config-changed', event => render(event.payload));

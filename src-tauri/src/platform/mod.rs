@@ -28,6 +28,9 @@ pub fn execute(entry: &AppEntry, action: Action) -> Result<(), String> {
     match action {
         Action::Launch => launch(entry),
         Action::Activate(id) => activate(id),
+        #[cfg(target_os = "macos")]
+        Action::Minimize(ids) => collapse(&ids),
+        #[cfg(not(target_os = "macos"))]
         Action::Minimize(ids) => {
             let mut errors = Vec::new();
             for id in ids {

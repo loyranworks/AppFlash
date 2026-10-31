@@ -14,7 +14,8 @@ fn entry(letter: &str) -> AppEntry {
 #[test]
 fn defaults_are_shared_and_delay_does_not_gate_switching() {
     let config = Config::default();
-    assert_eq!(config.hint.color, "#587a6b");
+    assert_eq!(config.hint.color, "#244b70");
+    assert_eq!(serde_json::to_value(&config).unwrap()["hint"]["scale"], 100);
     assert_eq!(config.prefix, vec!["Alt"]);
     assert_eq!(config.hint.delay, 0.5);
     assert_eq!(config.hint.order, "manual");
@@ -62,15 +63,19 @@ fn legacy_arguments_are_removed_without_losing_bindings_or_custom_delay() {
     value.apps.push(entry("B"));
     value.apps[0].path = directory.join("missing.exe").to_string_lossy().into();
     value.hint.delay = 2.0;
+    value.hint.color = "#81958a".into();
     let mut legacy = serde_json::to_value(&value).unwrap();
     legacy["apps"][0]["args"] = serde_json::json!(["--profile-directory=Work"]);
     legacy["hint"].as_object_mut().unwrap().remove("order");
+    legacy["hint"].as_object_mut().unwrap().remove("scale");
     legacy.as_object_mut().unwrap().remove("language");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let loaded = config::read(&path).unwrap();
     assert_eq!(loaded.prefix, value.prefix);
     assert_eq!(loaded.apps[0].path, value.apps[0].path);
     assert_eq!(loaded.hint.delay, 2.0);
+    assert_eq!(loaded.hint.color, "#81958a");
+    assert_eq!(serde_json::to_value(&loaded).unwrap()["hint"]["scale"], 100);
     assert_eq!(loaded.hint.order, "manual");
     assert_eq!(loaded.language, "zh-CN");
     assert!(serde_json::to_value(&loaded).unwrap()["apps"][0]
@@ -79,11 +84,13 @@ fn legacy_arguments_are_removed_without_losing_bindings_or_custom_delay() {
     assert_eq!(loaded.shortcuts().len(), 1);
     value.hint.color = "#81958a".into();
     value.hint.order = "alphabetical".into();
+    value.hint.scale = 80;
     value.language = "en".into();
     config::write(&path, &value).unwrap();
     assert_eq!(config::read(&path).unwrap().hint.color, "#81958a");
     assert_eq!(config::read(&path).unwrap().hint.order, "alphabetical");
     assert_eq!(config::read(&path).unwrap().language, "en");
+    assert_eq!(config::read(&path).unwrap().hint.scale, 80);
     value.hint.order = "unsupported".into();
     assert!(value.validate().is_err());
     value.hint.order = "manual".into();
@@ -116,5 +123,35 @@ fn every_supported_prefix_and_letter_parses_as_a_native_shortcut() {
                 "{key}"
             );
         }
+    }
+}
+
+#[test]
+fn accepts_only_integer_scale_percentages_between_fifty_and_one_fifty() {
+    for scale in [50, 80, 100, 150] {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value["hint"]["scale"] = serde_json::json!(scale);
+        let config: Config = serde_json::from_value(value).unwrap();
+        assert!(config.validate().is_ok(), "{scale}%");
+        assert_eq!(
+            serde_json::to_value(config).unwrap()["hint"]["scale"],
+            scale
+        );
+    }
+    for scale in [
+        serde_json::json!(0),
+        serde_json::json!(49),
+        serde_json::json!(151),
+        serde_json::json!(65536),
+        serde_json::json!(-1),
+        serde_json::json!(80.5),
+        serde_json::json!("80"),
+    ] {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value["hint"]["scale"] = scale.clone();
+        let valid = serde_json::from_value::<Config>(value)
+            .map(|config| config.validate().is_ok())
+            .unwrap_or(false);
+        assert!(!valid, "must reject {scale}");
     }
 }

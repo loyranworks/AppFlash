@@ -152,8 +152,8 @@ pub fn launch(entry: &AppEntry) -> Result<(), String> {
 pub fn activate(id: u64) -> Result<(), String> {
     request(json!({"command":"activate", "id":id})).map(|_| ())
 }
-pub fn minimize(id: u64) -> Result<(), String> {
-    request(json!({"command":"minimize", "id":id})).map(|_| ())
+pub fn collapse(ids: &[u64]) -> Result<(), String> {
+    request(json!({"command":"collapse", "ids":ids})).map(|_| ())
 }
 pub fn request_access() -> Result<(), String> {
     request(json!({"command":"access"})).map(|_| ())

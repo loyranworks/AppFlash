@@ -1,8 +1,12 @@
+#[cfg(target_os = "macos")]
+use crate::macos_cycle::Cycle;
+#[cfg(not(target_os = "macos"))]
+use crate::switching::Cycle;
 use crate::{
     bindings::{self, Registry},
     config::{self, Config},
     platform,
-    switching::{Action, Cycle},
+    switching::Action,
 };
 use serde::Serialize;
 use std::{
@@ -223,14 +227,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("贴边磨砂效果不可用：{error}");
     }
     #[cfg(target_os = "macos")]
-    if let Err(error) = window_vibrancy::apply_vibrancy(
-        &overlay,
-        window_vibrancy::NSVisualEffectMaterial::Sidebar,
-        Some(window_vibrancy::NSVisualEffectState::Active),
-        Some(16.0),
-    ) {
-        eprintln!("贴边磨砂效果不可用：{error}");
-    }
+    crate::macos_overlay::configure(&overlay)?;
     let handle = app.clone();
     let worker = runtime.clone();
     std::thread::spawn(move || {
@@ -276,6 +273,11 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             let _ = handle.emit("app-hit", &id);
             let result = platform::snapshot(&entry.path).and_then(|snapshot| {
+                #[cfg(target_os = "macos")]
+                let mut candidate = cycle.clone();
+                #[cfg(target_os = "macos")]
+                let action = candidate.next(&id, &snapshot.windows, snapshot.active);
+                #[cfg(not(target_os = "macos"))]
                 let action = cycle.next(&id, &snapshot.windows, snapshot.active);
                 if action == Action::Launch {
                     if launching
@@ -289,7 +291,12 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     launching.remove(&id);
                 }
-                platform::execute(entry, action)
+                let result = platform::execute(entry, action);
+                #[cfg(target_os = "macos")]
+                if result.is_ok() {
+                    cycle = candidate;
+                }
+                result
             });
             if let Err(error) = result {
                 launching.remove(&id);
@@ -320,7 +327,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             if !pressed {
                 began = None;
                 if visible {
-                    let _ = overlay.hide();
+                    let _ = set_hint_visible(&overlay, false);
                     let _ = handle.emit_to("overlay", "hint-hide", ());
                     visible = false;
                 }
@@ -333,7 +340,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = handle.emit("app-error", error);
                     continue;
                 }
-                match overlay.show() {
+                match set_hint_visible(&overlay, true) {
                     Ok(()) => {
                         visible = true;
                         let _ = handle.emit_to("overlay", "hint-show", ());
@@ -346,6 +353,32 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     Ok(())
+}
+
+fn set_hint_visible(overlay: &tauri::WebviewWindow, visible: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let (send, receive) = mpsc::channel();
+        let native_overlay = overlay.clone();
+        overlay
+            .app_handle()
+            .run_on_main_thread(move || {
+                dispatch2::DispatchQueue::main().exec_async(move || {
+                    let _ = send.send(crate::macos_overlay::set_visible(&native_overlay, visible));
+                });
+            })
+            .map_err(|error| error.to_string())?;
+        receive.recv().map_err(|error| error.to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if visible {
+            overlay.show()
+        } else {
+            overlay.hide()
+        }
+        .map_err(|error| error.to_string())
+    }
 }
 
 fn position_hint(app: &AppHandle, config: &Config) -> Result<(), String> {
@@ -367,21 +400,27 @@ fn position_hint(app: &AppHandle, config: &Config) -> Result<(), String> {
         .or_else(|| monitors.first())
         .ok_or("没有可用屏幕")?;
     let scale = monitor.scale_factor();
-    let width = (120.0 * scale).round() as u32;
     let count = config
         .apps
         .iter()
         .filter(|app| !app.letter.is_empty())
         .count();
-    let height = ((count as f64 * 46.0 + 64.0) * scale)
-        .round()
-        .min(monitor.size().height as f64 - 48.0 * scale)
-        .max(120.0 * scale) as u32;
+    let (width, height) = crate::overlay_layout::size(
+        count,
+        monitor.size().width,
+        monitor.size().height,
+        scale,
+        config.hint.scale,
+    );
+    #[cfg(target_os = "macos")]
+    let inset = (12.0 * scale).round() as i32;
+    #[cfg(not(target_os = "macos"))]
+    let inset = 0;
     let x = monitor.position().x
         + if config.hint.side == "right" {
-            monitor.size().width as i32 - width as i32
+            monitor.size().width as i32 - width as i32 - inset
         } else {
-            0
+            inset
         };
     let y = monitor.position().y + (monitor.size().height as i32 - height as i32) / 2;
     overlay
@@ -389,5 +428,21 @@ fn position_hint(app: &AppHandle, config: &Config) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     overlay
         .set_position(PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let (send, receive) = mpsc::channel();
+        let native_overlay = overlay.clone();
+        let ratio = f64::from(config.hint.scale) / 100.0;
+        app.run_on_main_thread(move || {
+            // Tao queues native geometry changes onto GCD. This subsequent
+            // queue turn observes those changes before copying the proxy frame.
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                let _ = send.send(crate::macos_overlay::set_scale(&native_overlay, ratio));
+            });
+        })
+        .map_err(|error| error.to_string())?;
+        receive.recv().map_err(|error| error.to_string())??;
+    }
+    Ok(())
 }

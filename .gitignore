@@ -8,3 +8,4 @@ src-tauri/gen/
 .env
 .env.*
 design/state/
+!tools/macos-signing-cert.pem
