@@ -47,8 +47,11 @@ test('letters are normalized, invalid input rejected, all glyphs available', () 
   assert.equal(Object.keys(glyphs).length, 26);
 });
 
-test('prefix warnings explain collisions before save', () => {
-  assert(shortcutWarnings(['Control'], 'windows').length > 0);
+test('single prefixes save without generic warnings; system-key warnings remain', () => {
+  for (const platform of ['windows', 'macos']) {
+    for (const modifier of ['Alt', 'Control', 'Shift']) assert.deepEqual(shortcutWarnings([modifier], platform), []);
+  }
   assert(shortcutWarnings(['Super'], 'macos').length > 0);
+  assert(shortcutWarnings(['Super'], 'windows').length > 0);
   assert.equal(shortcutWarnings(['Control', 'Alt'], 'windows').length, 0);
 });

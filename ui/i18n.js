@@ -48,7 +48,6 @@ export const english = {
   '语言已保存': 'Language saved', '正在保存语言…': 'Saving language…',
   '请通过 AppFlash 桌面应用打开设置；设计网页不具有系统快捷键权限。': 'Open Settings from the AppFlash desktop app. A browser preview cannot register system shortcuts.',
   '字母必须是一个 A–Z，留空表示暂不启用。': 'Use one letter A–Z, or leave it blank to disable.',
-  '单个修饰键容易覆盖应用常用快捷键，例如复制、全选或菜单操作。保存后，已分配的组合由 AppFlash 接管。': 'A single modifier may override shortcuts such as Copy, Select All or menu commands. Assigned combinations are handled by AppFlash after saving.',
   'Command 参与的组合可能与 macOS 或应用快捷键重叠。': 'Command combinations may conflict with macOS or application shortcuts.',
   'Win 参与的组合可能与系统保留快捷键重叠，部分组合无法注册。': 'Windows-key combinations may conflict with reserved system shortcuts and may fail to register.',
   '正在下载 {percent}%': 'Downloading {percent}%', '正在下载 {size} MB': 'Downloading {size} MB', '当前版本 {version}': 'Version {version}',

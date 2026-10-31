@@ -14,7 +14,8 @@ fn entry(letter: &str) -> AppEntry {
 #[test]
 fn defaults_are_shared_and_delay_does_not_gate_switching() {
     let config = Config::default();
-    assert_eq!(config.hint.color, "#71899a");
+    assert_eq!(config.hint.color, "#587a6b");
+    assert_eq!(config.prefix, vec!["Alt"]);
     assert_eq!(config.hint.delay, 0.5);
     assert_eq!(config.hint.order, "manual");
     assert_eq!(config.language, "zh-CN");
@@ -57,6 +58,7 @@ fn legacy_arguments_are_removed_without_losing_bindings_or_custom_delay() {
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("config.json");
     let mut value = Config::default();
+    value.prefix = vec!["Control".into(), "Shift".into()];
     value.apps.push(entry("B"));
     value.apps[0].path = directory.join("missing.exe").to_string_lossy().into();
     value.hint.delay = 2.0;
@@ -66,6 +68,7 @@ fn legacy_arguments_are_removed_without_losing_bindings_or_custom_delay() {
     legacy.as_object_mut().unwrap().remove("language");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let loaded = config::read(&path).unwrap();
+    assert_eq!(loaded.prefix, value.prefix);
     assert_eq!(loaded.apps[0].path, value.apps[0].path);
     assert_eq!(loaded.hint.delay, 2.0);
     assert_eq!(loaded.hint.order, "manual");

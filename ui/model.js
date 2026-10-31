@@ -34,7 +34,6 @@ export function moveApp(apps, id, direction) {
 
 export function shortcutWarnings(prefix, platform) {
   const warnings = [];
-  if (prefix.length === 1) warnings.push(t('单个修饰键容易覆盖应用常用快捷键，例如复制、全选或菜单操作。保存后，已分配的组合由 AppFlash 接管。'));
   if (prefix.includes('Super')) warnings.push(t(platform === 'macos' ? 'Command 参与的组合可能与 macOS 或应用快捷键重叠。' : 'Win 参与的组合可能与系统保留快捷键重叠，部分组合无法注册。'));
   return warnings;
 }

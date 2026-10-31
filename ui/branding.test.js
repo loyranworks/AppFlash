@@ -16,18 +16,24 @@ test('studio signature follows language without replacing the application slogan
   assert.equal(t('巧思成形，琢而至美。'), '巧思成形，琢而至美。');
 });
 
-test('brand fonts are local, compact and retain their licenses', () => {
+test('studio signature uses the existing UI font without loading brand fonts', () => {
   const css = readFileSync(new URL('./settings.css', import.meta.url), 'utf8');
-  for (const file of ['playfair-display-studio.woff2', 'noto-serif-sc-studio.woff2']) {
-    const bytes = readFileSync(new URL('./fonts/' + file, import.meta.url));
-    assert.equal(bytes.subarray(0, 4).toString(), 'wOF2');
-    assert.ok(bytes.length < 100000);
-    assert.ok(css.includes(file));
-  }
-  for (const file of ['Playfair-OFL.txt', 'NotoSerifSC-OFL.txt']) {
-    assert.match(readFileSync(new URL('./fonts/' + file, import.meta.url), 'utf8'), /SIL OPEN FONT LICENSE/);
-  }
-  assert.match(css, /:lang\(en\) \.studio-name/);
+  assert.match(css, /\.studio-name\{font-family:inherit;/);
+  assert.doesNotMatch(css, /@font-face|Studio Playfair|Studio Noto Serif|\.woff2/);
+});
+
+test('studio name matches the footer size and color in both languages, with a smaller motto', () => {
+  const css = readFileSync(new URL('./settings.css', import.meta.url), 'utf8');
+  const name = css.match(/\.studio-name\{([^}]+)\}/)[1];
+  const motto = css.match(/\.studio-motto\{([^}]+)\}/)[1];
+  assert.ok(name.includes('font-size:inherit'));
+  assert.ok(name.includes('color:inherit'));
+  assert.ok(motto.includes('font-size:9px'));
+  assert.ok(motto.includes('color:inherit'));
+  assert.doesNotMatch(css, /:lang\(en\) \.studio-name/);
+  assert.match(css, /\.studio-signature\{margin-top:8px;/);
+  assert.match(css, /\.sidebar-tail\{[^}]*font-size:10px;/);
+  assert.match(css, /\.sidebar\{padding-bottom:18px\}/);
 });
 
 test('native About includes localized studio credits and the actual package version', () => {
@@ -41,4 +47,16 @@ test('native About includes localized studio credits and the actual package vers
   assert.match(source, /comments: Some\(studio\.into\(\)\)/);
   assert.match(source, /credits: Some\(studio\.into\(\)\)/);
   assert.match(source, /Menu::with_items\(app, &\[&settings, &pause, &separator, &about, &quit\]\)/);
+});
+
+test('studio mark is decorative and uses the approved graphical master', () => {
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./settings.css', import.meta.url), 'utf8');
+  const mark = readFileSync(new URL('./studio-mark.svg', import.meta.url), 'utf8');
+  assert.match(html, /class="studio-mark" aria-hidden="true"/);
+  assert.match(css, /\.studio-mark\{width:44px;height:52px;grid-row:1 \/ 3;background:currentColor;/);
+  assert.match(css, /mask:url\('studio-mark.svg'\)/);
+  assert.match(mark, /data-master="approved-v6"/);
+  assert.equal((mark.match(/<path/g) || []).length, 15);
+  assert.doesNotMatch(mark, /<text/);
 });

@@ -199,7 +199,7 @@ byId('pause').addEventListener('click', async () => {
 });
 byId('access').addEventListener('click', async () => { try { await invoke('request_access'); } catch (error) { showError(error); } });
 for (const input of document.querySelectorAll('#prefix-options input,#hint-enabled,#hint-delay,#hint-order,input[name=side],#letter-color')) input.addEventListener('input', () => { changed(); updateTheme(); });
-byId('reset-color').addEventListener('click', () => { byId('letter-color').value = '#71899a'; changed(); updateTheme(); });
+byId('reset-color').addEventListener('click', () => { byId('letter-color').value = '#587a6b'; changed(); updateTheme(); });
 
 byId('autostart').addEventListener('change', async () => {
   const input = byId('autostart');

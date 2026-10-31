@@ -7,7 +7,7 @@ $graphics = [Drawing.Graphics]::FromImage($bitmap)
 $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $graphics.Clear([Drawing.Color]::Transparent)
 $graphics.ScaleTransform(2, 2)
-$ink = [Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#71899a'))
+$ink = [Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#587a6b'))
 $outline = [Drawing.Drawing2D.GraphicsPath]::new()
 $outline.AddArc(4, 4, 68, 68, 180, 90)
 $outline.AddArc(56, 4, 68, 68, 270, 90)

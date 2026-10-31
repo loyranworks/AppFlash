@@ -45,12 +45,12 @@ impl Default for Config {
         Self {
             version: 1,
             language: default_language(),
-            prefix: vec!["Control".into(), "Alt".into()],
+            prefix: vec!["Alt".into()],
             hint: Hint {
                 enabled: true,
                 delay: 0.5,
                 side: "right".into(),
-                color: "#71899a".into(),
+                color: "#587a6b".into(),
                 order: manual_order(),
             },
             apps: Vec::new(),

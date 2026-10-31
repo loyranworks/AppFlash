@@ -13,9 +13,9 @@ A focused Windows / macOS application switcher. Hold your chosen prefix and pres
 ## Get started
 
 1. Open AppFlash. No application bindings are preconfigured.
-2. Select **Applications** and choose a prefix, for example **Ctrl + Alt**. Multiple checked modifiers must be held together.
+2. Select **Applications** and choose a prefix; the recommended default is **Alt**. Multiple checked modifiers must be held together.
 3. Open **Applications**, import or add apps, and assign unique letters A–Z.
-4. Click **Save & apply**, close Settings, and press your shortcut. For Chrome assigned C, use **Ctrl + Alt + C**.
+4. Click **Save & apply**, close Settings, and press your shortcut. For Chrome assigned C, use **Alt + C**.
 
 Closing Settings keeps AppFlash running. The Windows tray / macOS menu bar offers Settings, pause / resume and Quit. Pausing releases registered shortcuts. Switching is suspended while Settings is focused to prevent accidental activation.
 
@@ -37,7 +37,7 @@ Prefix supports Control, Alt, Shift and Windows (Command on macOS), individually
 
 Click an app or its circular letter badge to edit. Adding, deleting and reordering take effect after saving. Registration failures attempt to restore old bindings. Failed rollback explicitly asks you to quit and reopen AppFlash.
 
-**Avoid shortcut conflicts.** Single Control may override Copy or Select All. Alt, Command and Windows combinations may overlap menus or reserved system shortcuts. Risk warnings cannot detect every shortcut inside other apps. Ctrl + Alt may overlap AltGr on some layouts. Check your work environment and exit old AHK scripts before testing overlapping bindings.
+**Shortcut conflicts.** Alt is the default. If a binding overlaps a shortcut you use in another app or the system, change its letter or prefix. Exit old AHK scripts using the same bindings before testing.
 
 ## Single and repeated presses
 
