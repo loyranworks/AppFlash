@@ -9,9 +9,11 @@ test('fixed certificate accepts changed builds but rejects ad-hoc, foreign and t
   const root = mkdtempSync(join(tmpdir(), 'appflash-signing-test-'));
   const keychain = join(root, 'test.keychain-db');
   const run = (program, args) => execFileSync(program, args, { stdio: 'pipe' }).toString();
+  const originalSearchList = [...run('security', ['list-keychains', '-d', 'user']).matchAll(/"([^"\n]+)"/g)].map(match => match[1]);
   try {
     run('security', ['create-keychain', '-p', 'ephemeral-test-only', keychain]);
     run('security', ['unlock-keychain', '-p', 'ephemeral-test-only', keychain]);
+    run('security', ['list-keychains', '-d', 'user', '-s', ...originalSearchList, keychain]);
     const identities = [];
     for (const name of ['expected', 'foreign']) {
       const config = join(root, `${name}.cnf`);
@@ -23,6 +25,14 @@ test('fixed certificate accepts changed builds but rejects ad-hoc, foreign and t
       identities.push({ cert, p12, identity: run('openssl', ['x509', '-in', cert, '-noout', '-fingerprint', '-sha1']).split('=')[1].trim().replaceAll(':', '') });
     }
     run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', 'ephemeral-test-only', keychain]);
+    const deadline = Date.now() + 5000;
+    let available = '';
+    do {
+      available = run('security', ['find-identity', '-p', 'codesigning', keychain]);
+      if (identities.every(value => available.toUpperCase().includes(value.identity.toUpperCase()))) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    } while (Date.now() < deadline);
+    assert.ok(identities.every(value => available.toUpperCase().includes(value.identity.toUpperCase())), `Temporary signing identities are unavailable:\n${available}\n${run('security', ['find-certificate', '-a', '-Z', keychain])}`);
     const paths = ['a', 'b', 'adhoc', 'foreign', 'tampered'].map(name => join(root, name));
     for (const [i, path] of paths.entries()) {
       const source = `${path}.c`;
@@ -56,7 +66,11 @@ test('fixed certificate accepts changed builds but rejects ad-hoc, foreign and t
     assert.notEqual(foreign.status, 0);
     assert.ok(!existsSync(state));
   } finally {
-    spawnSync('security', ['delete-keychain', keychain]);
-    rmSync(root, { recursive: true, force: true });
+    try {
+      run('security', ['list-keychains', '-d', 'user', '-s', ...originalSearchList]);
+    } finally {
+      spawnSync('security', ['delete-keychain', keychain]);
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });

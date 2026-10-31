@@ -86,7 +86,7 @@ macOS 会把本轮已经在前台的窗口计入已访问，依次置前剩余�
     npm run check
     npm run build
 
-Windows 安装包输出到 src-tauri/target/release/bundle/nsis/。生成带更新签名的安装包需要维护者签名私钥，见发布文档。更新签名不等于操作系统代码签名；macOS 0.1.8 起使用固定自签名证书签署完整应用包及原生组件；首次启动仍需手动允许。从旧临时签名迁移需重新添加一次辅助功能授权，之后使用同一证书的正常升级可保留授权。Windows 代码签名与 macOS Developer ID 签名 / 公证尚未完成，分发可能出现安全警告。
+Windows 安装包输出到 src-tauri/target/release/bundle/nsis/。生成带更新签名的安装包需要维护者签名私钥，见发布文档。更新签名不等于操作系统代码签名；macOS 0.1.9 起使用固定自签名证书签署完整应用包及原生组件；首次启动仍需手动允许。从旧临时签名迁移需重新添加一次辅助功能授权，之后使用同一证书的正常升级可保留授权。Windows 代码签名与 macOS Developer ID 签名 / 公证尚未完成，分发可能出现安全警告。
 
 ui/ 为无框架设置与提示界面；src-tauri/src/ 为配置、绑定事务、窗口循环和更新；其中 platform/ 为 Win32 / macOS Swift 原生适配；design/ 保留设计历史。
 

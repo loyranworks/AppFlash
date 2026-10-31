@@ -9,6 +9,7 @@ import pathlib
 import re
 import secrets
 import subprocess
+import time
 
 
 def checked(args, env=None):
@@ -21,6 +22,18 @@ def checked(args, env=None):
 
 def search_list():
     return re.findall(r'"([^"\n]+)"', checked(["security", "list-keychains", "-d", "user"]).decode())
+
+
+def wait_for_identity(keychain, identity):
+    deadline = time.monotonic() + 5
+    while True:
+        available = checked(["security", "find-identity", "-p", "codesigning", str(keychain)]).decode()
+        if re.search(r"\b" + re.escape(identity) + r"\b", available, re.IGNORECASE):
+            return
+        if time.monotonic() >= deadline:
+            certificates = checked(["security", "find-certificate", "-a", "-Z", str(keychain)]).decode()
+            raise ValueError("Imported certificate/private key identity is unavailable: " + identity + "\n" + available + "\n" + certificates)
+        time.sleep(0.1)
 
 
 def cleanup(state):
@@ -76,6 +89,7 @@ def import_identity(state, certificate):
             checked(["security", "import", str(archive), "-f", "pkcs12", "-k", str(keychain), "-P", password, "-T", "/usr/bin/codesign"])
             checked(["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychain_password, str(keychain)])
             checked(["security", "list-keychains", "-d", "user", "-s", *original, str(keychain)])
+            wait_for_identity(keychain, identity)
             exported = "APPLE_SIGNING_IDENTITY=" + identity + "\nAPP_FLASH_SIGNING_KEYCHAIN=" + str(keychain) + "\nAPP_FLASH_REQUIRE_STABLE_SIGNING=1\n"
             github_env = os.environ.get("GITHUB_ENV")
             if github_env:
