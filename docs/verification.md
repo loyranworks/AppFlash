@@ -1,5 +1,11 @@
 # AppFlash 验证记录
 
+## 2026-10-31 macOS 窗口恢复
+
+官方 v0.1.5 ARM 应用首次启动能显示设置；关闭设置后进程继续运行，从 Finder 再次打开却不恢复窗口。使用同一包实机复现，源码缺少 macOS `RunEvent::Reopen` 处理。现在使用 `App::run` 处理该事件，恢复设置并取消最小化；显示窗口失败会记录错误。
+
+修复逻辑在本机源码构建的调试应用中完成 GUI 验收：首次启动显示设置、关闭后 Finder 重开恢复、最小化后 Finder 重开恢复。`--background` 冷启动日志确认没有调用显示窗口逻辑；测试工具查询应用会触发 `Reopen`，经临时生命周期日志区分后确认，诊断日志代码已移除。最终 v0.1.6 源码的 25 项 JavaScript 和 16 项 Rust 测试通过，格式和发布版本检查通过；已有 `updates.rs:100` 不可达代码编译告警仍存在，与本次窗口逻辑无关。只读代码审查未发现阻断风险。
+
 ## 2026-10-31 macOS ARM 签名修复
 
 官方 v0.1.4 Apple Silicon DMG 与更新归档的 SHA-256 均与 GitHub Release 一致，DMG 内部校验通过。ARM 应用只有 linker ad-hoc 签名，完整应用包的严格校验报 `code has no resources but signature indicates they must be present`；同版本 Intel 应用完全未签名。对 ARM 应用补全 ad-hoc 签名后，`codesign --verify --deep --strict` 通过；`syspolicy_check distribution` 的代码签名错误消失，仍报告临时签名和缺少公证。

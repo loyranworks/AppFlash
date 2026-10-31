@@ -210,8 +210,13 @@ async fn request_access() -> Result<(), String> {
 
 fn show_settings(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.set_focus();
+        if let Err(error) = window
+            .unminimize()
+            .and_then(|_| window.show())
+            .and_then(|_| window.set_focus())
+        {
+            eprintln!("AppFlash 无法显示设置窗口：{error}");
+        }
     }
 }
 
@@ -322,8 +327,14 @@ fn main() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!());
-    if let Err(error) = result {
-        eprintln!("AppFlash 启动失败：{error}");
+        .build(tauri::generate_context!());
+    match result {
+        Ok(app) => app.run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                show_settings(_app);
+            }
+        }),
+        Err(error) => eprintln!("AppFlash 启动失败：{error}"),
     }
 }
