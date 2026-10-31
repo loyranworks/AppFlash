@@ -1,5 +1,16 @@
 # AppFlash 验证记录
 
+## 2026-10-31 v0.1.10 正式发布验收
+
+源码提交 `619ef2dd5429691f1b6f44d7d5df165ed0abb17f` 与 `v0.1.10` 标签原子推送。[Actions 41203038011](https://github.com/loyranworks/AppFlash/actions/runs/41203038011) 的 prepare、Windows x64、macOS ARM / Intel、publish 全部成功，两套 macOS 严格签名门禁通过。正式 [Release](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.10) 于 2026-10-31 13:04:24 UTC 发布，非草稿、非预发布，公开 latest 入口为 0.1.10；发布说明写明修复、验证范围与配置降级方式。
+
+9 个正式附件已匿名下载，大小与 SHA-256 均匹配 GitHub 元数据。三平台清单地址和 `.sig` 一致，全部更新包通过客户端原公钥、签名版本和篡改字节拒绝校验。两个 macOS 更新归档和 DMG 内应用均为 0.1.10，架构分别 arm64 / x86_64，严格完整签名、固定证书 pin 和不含 cdhash 的 designated requirement 校验通过，DMG 镜像校验通过；已只读挂载检查并卸载。
+
+Apple Silicon DMG SHA-256：`64c9f34bed2af9ff4e44c2cbfefbbe32b280fac8e60c07cf57238d3081b15880`；Intel DMG：`da42f524ccca568df8705326877747d8c05b9cc9a7ef61e08da0a5430e0bddc5`；Windows 安装器：`e7c14fa6db95c191bc876dc4159cf813258d1731006b6388ad92183a3e3a2335`。
+
+
+公开 Apple Silicon 更新归档已原位安装到 `/Applications/AppFlash.app`，未重新授权辅助功能。实际正式包再次通过：带辅助 CG 图层的单窗口三轮最小化/恢复、三窗口三轮逐个不同目标置前/全部最小化；整个目标 AX 图未预热的全屏首按切到另一普通窗口；混合全屏两轮、仅全屏三轮隐藏/恢复，均保留全屏。原配置已按字节恢复，测试窗口全部退出，AppFlash 正式版在后台运行。MBP 和 Windows 仍未直接实机验收。
+
 ## 2026-10-31 v0.1.10 窗口收起回归修复
 
 v0.1.9 把补充跨桌面发现的“未知 CG 表面”作为整个应用禁止收起的条件。部分应用存在没有可控制 AXWindow 根节点的辅助图层，识别永远无法完成，导致正常单窗口和多窗口都报“仍在确认目标应用其他桌面的窗口”。此前计算器和普通/全屏测试窗口未覆盖这种表面，验收结论范围过宽。
