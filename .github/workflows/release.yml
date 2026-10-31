@@ -75,6 +75,9 @@ jobs:
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+      - name: Verify macOS application signature before publishing
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "src-tauri/target/${{ matrix.target }}/release/bundle/macos/AppFlash.app"
   publish:
     needs: [prepare, build]
     runs-on: ubuntu-latest

@@ -1,5 +1,9 @@
 # 发布与升级
 
+## 0.1.5 macOS 分发修复
+
+macOS 两种架构均改为在打包时对完整应用包执行免费 ad-hoc 签名，修复 Apple Silicon 包只有链接器签名、严格校验失败的问题。CI 在 macOS 构建后执行 `codesign --verify --deep --strict`，任一架构失败会阻止正式发布。保留原自动更新公钥、应用标识和配置路径。首次启动仍可能需要在「隐私与安全性」中手动允许；此版本不包含 Developer ID 证书或 Apple 公证。
+
 GitHub CLI 已取得 workflow 授权，正式工作流位于 .github/workflows/release.yml，仅推送 v* 标签才触发发布。普通 main 提交不发布安装包。已配置更新签名 Secret；v0.1.1 已正式发布，公开更新清单及三个平台的下载地址已验证 HTTP 200。
 
 远端：`https://github.com/loyranworks/AppFlash.git`。源码与双语 README 已提交并通过 HTTPS 推送；项目使用独立 Git 仓库，不修改父目录仓库 remote。仓库已由维护者公开，客户端无需 GitHub Token。
@@ -35,7 +39,13 @@ Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY
 - 新版本在设置里显示，托盘悬停文本提示；不强制弹窗、不自动安装。
 - 用户确认后才下载并签名校验，要求签名包含与清单相同的版本，显示进度，安装后重启。未保存的设置会阻止升级；安装期间设置暂不可编辑。
 - 安装前备份已保存配置到同目录 `config.pre-update.json`；备份失败中止。保留原配置、快捷键与系统启动项；下载或签名失败不执行安装。
-- 更新签名不等于操作系统代码签名。当前 Windows 未做代码签名，macOS 未做 Developer ID 签名 / 公证，分发仍需处理系统安全提示。
+- 更新签名不等于操作系统代码签名。当前 Windows 未做代码签名；macOS 构建使用完整应用包的 ad-hoc 临时签名，尚未做 Developer ID 签名 / 公证，首次启动仍需在「系统设置 → 隐私与安全性」中手动允许。发布流程会严格校验两个 macOS 架构的应用包签名，校验失败则不发布。
+
+## macOS 提示「AppFlash 已损坏」
+
+2026-10-31 检查官方 v0.1.4 Apple Silicon 产物：DMG 的 SHA-256 与 GitHub Release 一致，`hdiutil verify` 通过，应用为 arm64。DMG 与更新归档内的 `.app` 均只有可执行文件的 linker ad-hoc 签名，没有绑定 Info.plist 或封存资源；`codesign --verify --deep --strict` 报 `code has no resources but signature indicates they must be present`。
+
+修复是在 `bundle.macOS` 中设置 `signingIdentity: "-"`，让 Tauri 在打包时签署完整 `.app`，不能只依赖链接器签名。对下载副本补全签名后，严格签名校验通过；Gatekeeper 检查仍为 rejected，因此此修复不代表免除系统安全提示。已发布的 v0.1.4 文件不会因源码修复而改变，需要重新构建并发布新版本。要让公开下载的应用正常通过 Gatekeeper，仍需配置 Developer ID Application 证书和 Apple 公证凭据，参见 [Tauri macOS 签名说明](https://v2.tauri.app/distribute/sign/macos/)。
 
 ## 验证限制
 

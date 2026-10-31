@@ -82,7 +82,7 @@ Install Node.js / npm, stable Rust and platform build tools. Windows requires MS
     npm run check
     npm run build
 
-Windows installers are produced in src-tauri/target/release/bundle/nsis/. Signed updater packages require the maintainer's signing key; consult the release instructions. Updater signatures are not OS code signing. Windows code signing and macOS signing / notarization remain outstanding, so security warnings may appear.
+Windows installers are produced in src-tauri/target/release/bundle/nsis/. Signed updater packages require the maintainer's signing key; consult the release instructions. Updater signatures are not OS code signing. macOS builds use an ad-hoc signature covering the complete app bundle and still require manual approval on first launch. Windows code signing and macOS Developer ID signing / notarization remain outstanding, so security warnings may appear.
 
 ui/ contains framework-free Settings and hint UI. src-tauri/src/ contains configuration, transactional registration, window cycling and updates. Its platform/ implements Win32 and the native macOS Swift helper. design/ retains visual iterations.
 

@@ -84,7 +84,7 @@
     npm run check
     npm run build
 
-Windows 安装包输出到 src-tauri/target/release/bundle/nsis/。生成带更新签名的安装包需要维护者签名私钥，见发布文档。更新签名不等于操作系统代码签名；Windows 代码签名与 macOS 签名 / 公证尚未完成，分发可能出现安全警告。
+Windows 安装包输出到 src-tauri/target/release/bundle/nsis/。生成带更新签名的安装包需要维护者签名私钥，见发布文档。更新签名不等于操作系统代码签名；macOS 构建使用完整应用包的 ad-hoc 临时签名，首次启动仍需手动允许。Windows 代码签名与 macOS Developer ID 签名 / 公证尚未完成，分发可能出现安全警告。
 
 ui/ 为无框架设置与提示界面；src-tauri/src/ 为配置、绑定事务、窗口循环和更新；其中 platform/ 为 Win32 / macOS Swift 原生适配；design/ 保留设计历史。
 

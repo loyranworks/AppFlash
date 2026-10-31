@@ -1,5 +1,13 @@
 # AppFlash 验证记录
 
+## 2026-10-31 macOS ARM 签名修复
+
+官方 v0.1.4 Apple Silicon DMG 与更新归档的 SHA-256 均与 GitHub Release 一致，DMG 内部校验通过。ARM 应用只有 linker ad-hoc 签名，完整应用包的严格校验报 `code has no resources but signature indicates they must be present`；同版本 Intel 应用完全未签名。对 ARM 应用补全 ad-hoc 签名后，`codesign --verify --deep --strict` 通过；`syspolicy_check distribution` 的代码签名错误消失，仍报告临时签名和缺少公证。
+
+源码设置 `bundle.macOS.signingIdentity` 为 `-`，发布工作流在两个 macOS 架构构建完成后执行严格签名校验；失败会阻止正式发布。25 项 JavaScript 测试、发布配置检查和 `git diff --check` 通过；只读代码审查未发现阻断问题。本机没有 Rust，未执行 Rust 测试或源码重编译，未推送代码或发布新 Release。
+
+交付 `../artifacts/AppFlash_0.1.4_aarch64_adhoc.dmg`，基于已核对哈希的官方 v0.1.4 ARM 二进制补签重打包。最终 DMG 的 `hdiutil verify` 通过；重新只读挂载后，包内应用的严格签名校验通过，架构为 arm64。补签应用使用临时配置目录启动并持续运行 10 秒，随后停止测试进程；未提前退出或报告 AppFlash 启动失败，但 stderr 包含 `sandbox_extension_issue_file_to_process` 告警，未据此声称完整界面或辅助功能验收。未关闭 Gatekeeper 或移除隔离属性，首次启动的系统手动允许仍需用户完成。
+
 ## 0.1.3 远端发布验证
 
 正式版本标签 v0.1.3 指向 d586a9f。Actions 41036956626 首次在创建草稿后立即读取 Release ID 时未找到新草稿；确认唯一草稿存在后只重跑失败流程。第二次准备、Windows、macOS ARM、macOS Intel 及 publish 全部成功，共用一份 Release；未手工合并安装包。2026-10-30 18:07:02（北京时间）正式发布，非草稿、非预发布，公开 latest.json 为 0.1.3。三个公开更新包均匿名下载成功，并通过原公钥、签名版本及篡改拒绝测试。未执行已安装客户端的实际升级或 macOS 实机验收。创建草稿后的即时列表可见性仍可能造成后续首次运行失败，工作流未在本次额外改动。
