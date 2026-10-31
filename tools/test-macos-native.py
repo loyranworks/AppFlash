@@ -47,6 +47,49 @@ def stop(process):
             process.wait(timeout=5)
 
 
+def cold_fullscreen_controls(helper, path, application, root):
+    """The target app must enter full screen BEFORE its first AX query."""
+    state_file = root / "fixture-state.json"
+
+    def fixture_state(check):
+        deadline = time.monotonic() + 8
+        last = None
+        while time.monotonic() < deadline:
+            try:
+                last = json.loads(state_file.read_text())
+                if check(last):
+                    return last
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+            time.sleep(0.05)
+        raise AssertionError("Cold fixture state did not converge: " + str(last))
+
+    fixture_state(lambda state: state["launched"])
+    application.send_signal(signal.SIGUSR1)
+    fixture_state(lambda state: state["fullscreen_phase"] == "entered" and any(
+        w["identifier"] == "appflash-test-0" and w["key"] and w["on_active_space"] for w in state["windows"]))
+    first = request(helper, {"command": "snapshot", "path": str(path)})
+    assert "data" in first, first
+    active = first["data"]["active"]
+    assert active is not None, first
+    ids = [w["id"] for w in first["data"]["windows"]]
+    # Before a fullscreen collapse, visiting the ordinary desktop exposes AX
+    # roots that the app has never published. Do not hide or require another key.
+    prepared = request(helper, {"command": "prepare-collapse", "path": str(path), "ids": ids})
+    assert "data" in prepared and prepared["data"] is not None, prepared
+    refreshed = prepared["data"]
+    assert len(refreshed["windows"]) == 2, {"first": first, "prepared": prepared}
+    target = next(w["id"] for w in refreshed["windows"] if w["id"] != active)
+    assert request(helper, {"command": "activate", "id": target}) == {"data": True}
+    fixture_state(lambda state: state["active"] and not state["hidden"] and state["fullscreen"] and any(
+        w["identifier"] == "appflash-test-1" and w["key"] and w["on_active_space"] for w in state["windows"]))
+    ids = [w["id"] for w in refreshed["windows"]]
+    assert request(helper, {"command": "collapse", "ids": ids}) == {"data": True}
+    fixture_state(lambda state: state["hidden"] and state["fullscreen"])
+    print("Cold target AX graph: first snapshot count=" + str(len(first["data"]["windows"])) +
+          "; pre-collapse refresh count=2; other exact window activated; fullscreen collapse preserved", flush=True)
+
+
 def window_controls(helper, path, application, root, fullscreen=False, check_space=False, self_hide_probe=False):
     state_file = root / "fixture-state.json"
     identities = {}
@@ -144,13 +187,20 @@ def window_controls(helper, path, application, root, fullscreen=False, check_spa
         cold = subprocess.Popen(helper.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
         try:
             cold_reply = None
+            first_snapshot_window_count = None
+            cold_snapshots = 0
             cold_deadline = time.monotonic() + 3
             while time.monotonic() < cold_deadline:
                 cold_reply = request(cold, {"command": "snapshot", "path": str(path)})
+                cold_snapshots += 1
+                if first_snapshot_window_count is None:
+                    first_snapshot_window_count = len(cold_reply.get("data", {}).get("windows", []))
                 if len(cold_reply.get("data", {}).get("windows", [])) == len(entered["windows"]):
                     break
                 time.sleep(0.1)
-            cold_context = {"phase": "cold-start-fullscreen", "reply": cold_reply, "fixture": latest_fixture(), "expected_window_count": len(entered["windows"])}
+            cold_context = {"phase": "cold-start-fullscreen", "first_snapshot_window_count": first_snapshot_window_count,
+                            "snapshot_count": cold_snapshots, "reply": cold_reply, "fixture": latest_fixture(),
+                            "expected_window_count": len(entered["windows"])}
             print("Native cold-start enumeration: " + json.dumps(cold_context, ensure_ascii=False, sort_keys=True), flush=True)
         finally:
             stop(cold)
@@ -233,7 +283,8 @@ def main():
     assert sys.platform == "darwin", "This test requires macOS"
     native = pathlib.Path(sys.argv[1]).resolve()
     self_hide_probe = "--self-hide-probe" in sys.argv[2:]
-    fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe
+    cold_fullscreen = "--cold-fullscreen" in sys.argv[2:]
+    fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe or cold_fullscreen
     check_space = "--check-space" in sys.argv[2:]
     control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space
     with tempfile.TemporaryDirectory(prefix="appflash-native-test-") as temporary:
@@ -298,7 +349,9 @@ let statePath = ProcessInfo.processInfo.environment["APPFLASH_FIXTURE_STATE"]
 if let statePath = statePath {
     signal(SIGUSR1, SIG_IGN)
     let signalSource = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
-    signalSource.setEventHandler { windows.first?.toggleFullScreen(nil) }
+    signalSource.setEventHandler {
+        if let window = windows.first { window.makeKeyAndOrderFront(nil); window.toggleFullScreen(nil) }
+    }
     signalSource.resume()
     signal(SIGUSR2, SIG_IGN)
     let closeSource = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
@@ -366,16 +419,19 @@ if let statePath = statePath {
                                            stderr=subprocess.DEVNULL, env=environment)
             wait_listed(helper, fixture.resolve(), True)
             if control_windows:
-                window_controls(helper, fixture.resolve(), application, root, fullscreen, check_space, self_hide_probe)
+                if cold_fullscreen:
+                    cold_fullscreen_controls(helper, fixture.resolve(), application, root)
+                else:
+                    window_controls(helper, fixture.resolve(), application, root, fullscreen, check_space, self_hide_probe)
             stop(application)
             wait_listed(helper, fixture.resolve(), False)
             assert "error" in request(helper, {"command": "not-a-command"})
             helper.stdin.close()
             assert helper.wait(timeout=5) == 0, "Helper did not exit cleanly on stdin EOF"
             print("Native IPC, live application launch/exit updates and EOF shutdown passed")
-            if control_windows:
+            if control_windows and not cold_fullscreen:
                 print("Two-window exact activation, batch collapse and restoration passed")
-            if fullscreen:
+            if fullscreen and not cold_fullscreen:
                 print("Full-screen exact AX focus, hide/unhide and preservation passed")
             if check_space:
                 print("Exact fixture key window on active Space verified for every activation")

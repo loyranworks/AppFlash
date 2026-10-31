@@ -16,6 +16,119 @@ fn windows(ids: &[u64]) -> Vec<Window> {
 }
 
 #[test]
+fn single_window_uses_its_current_minimized_state_after_external_changes() {
+    let mut cycle = Cycle::default();
+    assert_eq!(
+        cycle.next("app", &windows(&[10]), None),
+        Action::Activate(10)
+    );
+    let minimized = vec![Window {
+        id: 10,
+        minimized: true,
+    }];
+    // The user minimized the only window outside AppFlash after activation.
+    assert_eq!(cycle.next("app", &minimized, None), Action::Activate(10));
+    assert_eq!(
+        cycle.next("app", &windows(&[10]), Some(10)),
+        Action::Minimize(vec![10])
+    );
+}
+
+#[test]
+fn single_window_restored_externally_can_be_minimized_on_the_next_press() {
+    let mut cycle = Cycle::default();
+    assert_eq!(
+        cycle.next("app", &windows(&[10]), Some(10)),
+        Action::Minimize(vec![10])
+    );
+    // The actual visible foreground state takes priority over round bookkeeping.
+    assert_eq!(
+        cycle.next("app", &windows(&[10]), Some(10)),
+        Action::Minimize(vec![10])
+    );
+}
+
+#[test]
+fn single_window_repeatedly_minimizes_and_restores() {
+    let mut cycle = Cycle::default();
+    let minimized = vec![Window {
+        id: 10,
+        minimized: true,
+    }];
+    for _ in 0..3 {
+        assert_eq!(
+            cycle.next("app", &windows(&[10]), Some(10)),
+            Action::Minimize(vec![10])
+        );
+        assert_eq!(
+            cycle.next("app", &minimized, Some(10)),
+            Action::Activate(10)
+        );
+    }
+}
+
+#[test]
+fn newly_opened_second_window_is_visited_before_collapsing() {
+    let mut cycle = Cycle::default();
+    assert_eq!(
+        cycle.next("app", &windows(&[10]), None),
+        Action::Activate(10)
+    );
+    assert_eq!(
+        cycle.next("app", &windows(&[10, 20]), Some(10)),
+        Action::Activate(20)
+    );
+    assert_eq!(
+        cycle.next("app", &windows(&[10, 20]), Some(20)),
+        Action::Minimize(vec![10, 20])
+    );
+}
+
+#[test]
+fn cold_fullscreen_collapse_is_replanned_when_the_desktop_exposes_another_window() {
+    let committed = Cycle::default();
+    let (mut candidate, action) = committed
+        .plan("app", &windows(&[10]), Some(10), |ids| {
+            assert_eq!(ids, &[10]);
+            // Finder temporarily takes focus, but 10 was visited when the key was
+            // pressed. The newly published 20 is the next target in this same press.
+            Ok(Some(windows(&[20, 10])))
+        })
+        .unwrap();
+    assert_eq!(action, Action::Activate(20));
+    assert_eq!(
+        candidate.next("app", &windows(&[20, 10]), Some(20)),
+        Action::Minimize(vec![20, 10])
+    );
+}
+
+#[test]
+fn pre_collapse_discovery_without_new_windows_still_collapses() {
+    let committed = Cycle::default();
+    let (_, action) = committed
+        .plan("app", &windows(&[10]), Some(10), |_| {
+            Ok(Some(windows(&[10])))
+        })
+        .unwrap();
+    assert_eq!(action, Action::Minimize(vec![10]));
+    let (_, action) = committed
+        .plan("app", &windows(&[10]), Some(10), |_| Ok(None))
+        .unwrap();
+    assert_eq!(action, Action::Minimize(vec![10]));
+}
+
+#[test]
+fn activation_does_not_switch_desktop_for_collapse_discovery() {
+    let committed = Cycle::default();
+    let (_, action) = committed
+        .plan("app", &windows(&[10]), None, |_| {
+            panic!("Activation must not prepare a collapse")
+        })
+        .unwrap();
+    assert_eq!(action, Action::Activate(10));
+}
+
+#[test]
 fn initially_active_last_window_does_not_end_the_round_early() {
     let mut cycle = Cycle::default();
     let snapshot = windows(&[10, 20, 30]);
@@ -162,22 +275,25 @@ fn failed_activation_candidate_is_dropped_and_retried_before_progressing() {
 #[test]
 fn failed_collapse_candidate_retries_collapse_instead_of_starting_a_new_round() {
     let mut committed = Cycle::default();
-    let snapshot = windows(&[10]);
-    assert_eq!(committed.next("app", &snapshot, None), Action::Activate(10));
+    let snapshot = windows(&[10, 20]);
+    assert_eq!(
+        committed.next("app", &snapshot, Some(10)),
+        Action::Activate(20)
+    );
     let mut failed = committed.clone();
     assert_eq!(
-        failed.next("app", &snapshot, Some(10)),
-        Action::Minimize(vec![10])
+        failed.next("app", &snapshot, Some(20)),
+        Action::Minimize(vec![10, 20])
     );
     drop(failed);
     let mut retry = committed.clone();
     assert_eq!(
         retry.next("app", &snapshot, None),
-        Action::Minimize(vec![10])
+        Action::Minimize(vec![10, 20])
     );
     committed = retry;
     assert_eq!(
-        committed.next("app", &snapshot, Some(10)),
+        committed.next("app", &snapshot, Some(20)),
         Action::Activate(10)
     );
 }

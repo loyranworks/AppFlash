@@ -24,6 +24,40 @@ fn defaults_are_shared_and_delay_does_not_gate_switching() {
 }
 
 #[test]
+fn old_factory_green_migrates_to_navy_without_overwriting_other_custom_colors() {
+    let directory =
+        std::env::temp_dir().join(format!("app-flash-theme-test-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("config.json");
+    for (old, expected) in [
+        ("#587a6b", "#244b70"),
+        ("#587A6B", "#244b70"),
+        ("#81958a", "#81958a"),
+        ("#244b70", "#244b70"),
+    ] {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value.as_object_mut().unwrap().remove("theme_revision");
+        value["hint"]["color"] = serde_json::json!(old);
+        value["hint"]["scale"] = serde_json::json!(80);
+        let original = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &original).unwrap();
+        let loaded = config::read(&path).unwrap();
+        assert_eq!(loaded.hint.color, expected);
+        assert_eq!(loaded.hint.scale, 80);
+        assert_eq!(loaded.prefix, vec!["Alt"]);
+        assert_eq!(serde_json::to_value(&loaded).unwrap()["theme_revision"], 1);
+        // Reading upgrades the effective configuration without rewriting the
+        // user's source file. The normal save transaction persists the marker.
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+    let mut explicitly_chosen = config::read(&path).unwrap();
+    explicitly_chosen.hint.color = "#587a6b".into();
+    config::write(&path, &explicitly_chosen).unwrap();
+    assert_eq!(config::read(&path).unwrap().hint.color, "#587a6b");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn rejects_duplicates_bad_letters_and_invalid_delay() {
     let mut config = Config::default();
     config.apps.push(entry("A"));

@@ -13,6 +13,27 @@ pub struct Cycle {
 }
 
 impl Cycle {
+    /// Plan transactionally. Before a fullscreen collapse, the native layer may
+    /// expose previously unpublished AX roots by leaving its Space. Replan once
+    /// with those windows and the focus at key-down, before committing any round.
+    pub fn plan(
+        &self,
+        app: &str,
+        windows: &[Window],
+        active: Option<u64>,
+        prepare: impl FnOnce(&[u64]) -> Result<Option<Vec<Window>>, String>,
+    ) -> Result<(Self, Action), String> {
+        let mut candidate = self.clone();
+        let mut action = candidate.next(app, windows, active);
+        if let Action::Minimize(ids) = &action {
+            if let Some(refreshed) = prepare(ids)? {
+                candidate = self.clone();
+                action = candidate.next(app, &refreshed, active);
+            }
+        }
+        Ok((candidate, action))
+    }
+
     pub fn next(&mut self, app: &str, windows: &[Window], active: Option<u64>) -> Action {
         if self.app != app {
             *self = Self {
@@ -32,6 +53,20 @@ impl Cycle {
             self.ignore_active_once = false;
             self.observed_active = None;
             return Action::Launch;
+        }
+
+        // A single window is a state-based toggle, not a visitation round.
+        // Manual minimize/restore must take effect on the very next shortcut.
+        if windows.len() == 1 {
+            self.visited.clear();
+            self.observed_active = None;
+            self.ignore_active_once = false;
+            let window = &windows[0];
+            return if !window.minimized && active == Some(window.id) {
+                Action::Minimize(vec![window.id])
+            } else {
+                Action::Activate(window.id)
+            };
         }
 
         // A successful collapse can still be followed by the previous active

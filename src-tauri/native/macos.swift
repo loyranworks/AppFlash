@@ -19,7 +19,7 @@ func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
 }
 
 // Pure classification of off-screen WindowServer chrome. This never suppresses
-// a known eligible AXWindow; it only narrows unknown discovery/pending evidence.
+// a known eligible AXWindow; it only narrows supplemental discovery evidence.
 func isOffscreenChromeSurface(frame: CGRect, offscreen: Bool, alpha: Double?, menuBarFrames: [CGRect], activeDisplayBounds: [CGRect]? = nil) -> Bool {
     let outsideDisplays = activeDisplayBounds.map { displays in
         !displays.isEmpty && displays.allSatisfy { display in
@@ -50,14 +50,13 @@ func activeQuartzDisplayBounds() -> [CGRect]? {
 // This implementation scans only exact missing WindowServer IDs, never titles
 // or approximate positions. A time-limited scan is best effort, not proof that
 // every possible remote AX element has been inspected. Unresolved WindowServer
-// surfaces may have no AX root at all: keep them pending and refuse collapse,
-// while still allowing known-window activation. A finite scan cannot prove such
-// a surface is not an undiscovered ordinary window. Explicit nonstandard AXWindow
+// surfaces may have no AX root at all; they must not block operations on confirmed
+// AX windows. Keep scanning on later snapshots to supplement the public lists.
+// Explicit nonstandard AXWindow
 // roots are excluded only after classification and revalidated on later snapshots.
 private final class CrossSpaceWindowDiscovery {
     typealias WindowIDFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> Int32
     typealias TokenFunction = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
-    struct Discovery { let found: [AXUIElement]; let pending: Bool }
     struct Progress {
         var cursor: UInt64 = 0
         var lastScan: TimeInterval = -.infinity
@@ -71,7 +70,6 @@ private final class CrossSpaceWindowDiscovery {
     private let windowID: WindowIDFunction?
     private let fromToken: TokenFunction?
     private var progress: [pid_t: Progress] = [:]
-    private var pendingPIDs = Set<pid_t>()
 
     private init() {
         // Keep the framework loaded as long as the resolved function pointers.
@@ -89,10 +87,7 @@ private final class CrossSpaceWindowDiscovery {
 
     func removeExited(_ livePIDs: Set<pid_t>) {
         progress = progress.filter { livePIDs.contains($0.key) }
-        pendingPIDs.formIntersection(livePIDs)
     }
-
-    func isPending(pid: pid_t) -> Bool { pendingPIDs.contains(pid) }
 
     func isOnscreen(_ window: AXUIElement) -> Bool? {
         guard let getID = windowID else { return nil }
@@ -100,11 +95,6 @@ private final class CrossSpaceWindowDiscovery {
         guard getID(window, &id) == AXError.success.rawValue, id != 0,
               let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         return visible.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
-    }
-
-    private func result(pid: pid_t, found: [AXUIElement], pending: Bool) -> Discovery {
-        if pending { pendingPIDs.insert(pid) } else { pendingPIDs.remove(pid) }
-        return Discovery(found: found, pending: pending)
     }
 
     private func classify(_ window: AXUIElement, deadline: TimeInterval) -> Classification {
@@ -156,10 +146,10 @@ private final class CrossSpaceWindowDiscovery {
         return frames
     }
 
-    func additionalWindows(pid: pid_t, known: [AXUIElement]) -> Discovery {
+    func additionalWindows(pid: pid_t, known: [AXUIElement]) -> [AXUIElement] {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.15
         guard let inventory = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return result(pid: pid, found: [], pending: true)
+            return []
         }
         var missing = Set<CGWindowID>()
         var inventoryFrames: [CGWindowID: CGRect] = [:]
@@ -191,11 +181,11 @@ private final class CrossSpaceWindowDiscovery {
             state.retired.formIntersection(observedCGIDs)
             progress[pid] = state
         }
-        guard !missing.isEmpty else { return result(pid: pid, found: [], pending: false) }
+        guard !missing.isEmpty else { return [] }
         // Without either optional symbol, public enumeration/activation remains
-        // usable, but completeness cannot be certified for collapsing a round.
+        // usable, including operations on its confirmed windows.
         guard let getID = windowID, let create = fromToken else {
-            return result(pid: pid, found: [], pending: true)
+            return []
         }
         let inventoryIDs = missing
         var state = progress[pid] ?? Progress()
@@ -276,7 +266,7 @@ private final class CrossSpaceWindowDiscovery {
         guard !missing.isEmpty else {
             state.missing.removeAll()
             progress[pid] = state
-            return result(pid: pid, found: found, pending: false)
+            return found
         }
         // A newly missing CG ID may belong to an element before the saved cursor.
         if !missing.isSubset(of: state.missing) { state.cursor = 0 }
@@ -284,7 +274,7 @@ private final class CrossSpaceWindowDiscovery {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - state.lastScan >= 1 else {
             progress[pid] = state
-            return result(pid: pid, found: found, pending: true)
+            return found
         }
         state.lastScan = now
         scan: while !missing.isEmpty && ProcessInfo.processInfo.systemUptime < deadline {
@@ -326,7 +316,7 @@ private final class CrossSpaceWindowDiscovery {
         }
         state.missing = missing
         progress[pid] = state
-        return result(pid: pid, found: found, pending: !missing.isEmpty)
+        return found
     }
 }
 
@@ -386,6 +376,7 @@ func prepareToHide(_ app: NSRunningApplication, windows: [StoredWindow], deadlin
     func sourceIsAway() -> Bool {
         attribute(source, kAXFrontmostAttribute) as? Bool == false && fullScreen.allSatisfy { discovery.isOnscreen($0.element) == false }
     }
+    if sourceIsAway() { return }
     // First transfer activation to a different already running application,
     // even if this app also has an ordinary window. Merely selecting its own
     // ordinary window leaves it frontmost and did not permit hiding full screen.
@@ -406,9 +397,6 @@ func collapse(_ windows: [StoredWindow]) throws {
     let deadline = Date(timeIntervalSinceNow: 2)
     var apps: [pid_t: NSRunningApplication] = [:]
     for window in windows { apps[window.app.processIdentifier] = window.app }
-    for app in apps.values where CrossSpaceWindowDiscovery.shared.isPending(pid: app.processIdentifier) {
-        throw NativeFailure(message: "仍在确认目标应用其他桌面的窗口，请稍后再次按快捷键；本轮进度已保留。")
-    }
     var fullScreen = windows.contains { attribute($0.element, "AXFullScreen") as? Bool == true }
     for app in apps.values {
         let element = AXUIElementCreateApplication(app.processIdentifier)
@@ -522,7 +510,7 @@ func handle(_ request: [String: Any]) throws -> Any {
                 }
             }
             candidates += cached.sorted { $0.key < $1.key }.map { $0.value.element }
-            candidates += CrossSpaceWindowDiscovery.shared.additionalWindows(pid: app.processIdentifier, known: candidates).found
+            candidates += CrossSpaceWindowDiscovery.shared.additionalWindows(pid: app.processIdentifier, known: candidates)
             let focused = attribute(element, kAXFocusedWindowAttribute)
             var seen: [AXUIElement] = []
             for window in candidates {
@@ -556,11 +544,27 @@ func handle(_ request: [String: Any]) throws -> Any {
         return ["windows": windows, "active": active]
     }
     try requireAccess()
-    if command == "collapse" {
+    if command == "collapse" || command == "prepare-collapse" {
+        if command == "prepare-collapse", request["path"] as? String == nil { throw NativeFailure(message: "无效应用路径") }
         guard let numbers = request["ids"] as? [NSNumber] else { throw NativeFailure(message: "无效窗口列表") }
         let windows = try numbers.map { number -> StoredWindow in
             guard let window = stored[number.uint64Value] else { throw NativeFailure(message: "目标窗口已关闭") }
             return window
+        }
+        if command == "prepare-collapse" {
+            // A window on the ordinary desktop may not have any AX root until
+            // that desktop is visited. Before hiding a fullscreen app, reuse the
+            // existing safe departure, then let Rust replan this SAME key press.
+            // Unknown CG-only surfaces never block operations on known windows.
+            var prepared = Set<pid_t>()
+            let deadline = Date(timeIntervalSinceNow: 2)
+            for window in windows where attribute(window.element, "AXFullScreen") as? Bool == true {
+                if prepared.insert(window.app.processIdentifier).inserted {
+                    try prepareToHide(window.app, windows: windows, deadline: deadline)
+                }
+            }
+            if prepared.isEmpty { return NSNull() }
+            return try handle(["command": "snapshot", "path": request["path"]!])
         }
         try collapse(windows)
         return true

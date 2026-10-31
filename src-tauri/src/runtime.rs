@@ -274,9 +274,11 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             let _ = handle.emit("app-hit", &id);
             let result = platform::snapshot(&entry.path).and_then(|snapshot| {
                 #[cfg(target_os = "macos")]
-                let mut candidate = cycle.clone();
-                #[cfg(target_os = "macos")]
-                let action = candidate.next(&id, &snapshot.windows, snapshot.active);
+                let (candidate, action) =
+                    cycle.plan(&id, &snapshot.windows, snapshot.active, |ids| {
+                        platform::prepare_collapse(&entry.path, ids)
+                            .map(|refreshed| refreshed.map(|snapshot| snapshot.windows))
+                    })?;
                 #[cfg(not(target_os = "macos"))]
                 let action = cycle.next(&id, &snapshot.windows, snapshot.active);
                 if action == Action::Launch {

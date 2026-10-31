@@ -94,7 +94,7 @@ fn request(value: Value) -> Result<Value, String> {
     result
 }
 
-pub fn snapshot(path: &str) -> Result<Snapshot, String> {
+fn parse_snapshot(value: Value) -> Result<Snapshot, String> {
     #[derive(Deserialize)]
     struct NativeWindow {
         id: u64,
@@ -106,8 +106,7 @@ pub fn snapshot(path: &str) -> Result<Snapshot, String> {
         active: Option<u64>,
     }
     let result: NativeSnapshot =
-        serde_json::from_value(request(json!({"command":"snapshot", "path":path}))?)
-            .map_err(|error| error.to_string())?;
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
     Ok(Snapshot {
         windows: result
             .windows
@@ -119,6 +118,19 @@ pub fn snapshot(path: &str) -> Result<Snapshot, String> {
             .collect(),
         active: result.active,
     })
+}
+
+pub fn snapshot(path: &str) -> Result<Snapshot, String> {
+    parse_snapshot(request(json!({"command":"snapshot", "path":path}))?)
+}
+
+pub fn prepare_collapse(path: &str, ids: &[u64]) -> Result<Option<Snapshot>, String> {
+    let result = request(json!({"command":"prepare-collapse", "path":path, "ids":ids}))?;
+    if result.is_null() {
+        Ok(None)
+    } else {
+        parse_snapshot(result).map(Some)
+    }
 }
 
 pub fn running_apps() -> Result<Vec<RunningApp>, String> {

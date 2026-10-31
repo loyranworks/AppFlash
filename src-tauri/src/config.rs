@@ -35,6 +35,8 @@ fn manual_order() -> String {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
+    #[serde(default)]
+    pub theme_revision: u8,
     #[serde(default = "default_language")]
     pub language: String,
     pub prefix: Vec<String>,
@@ -50,6 +52,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             version: 1,
+            theme_revision: 1,
             language: default_language(),
             prefix: vec!["Alt".into()],
             hint: Hint {
@@ -183,9 +186,17 @@ pub fn read(path: &Path) -> Result<Config, String> {
             }
         }
     }
-    let config: Config = serde_json::from_value(value)
+    let mut config: Config = serde_json::from_value(value)
         .map_err(|error| format!("配置读取失败，原文件未修改：{error}"))?;
     config.validate()?;
+    if config.theme_revision == 0 {
+        // Upgrade the old factory color once. A later explicit choice of that
+        // same green is custom and must survive subsequent launches.
+        if config.hint.color.eq_ignore_ascii_case("#587a6b") {
+            config.hint.color = Config::default().hint.color;
+        }
+        config.theme_revision = 1;
+    }
     Ok(config)
 }
 

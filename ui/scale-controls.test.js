@@ -34,7 +34,7 @@ test('saving carries scale with existing bindings and custom color, and rejects 
   const end = source.indexOf('async function save(', start);
   const nodes = { 'hint-scale': { value: '80' }, 'hint-delay': { value: '0.5' }, 'hint-enabled': { checked: true }, 'letter-color': { value: '#81958a' }, 'hint-order': { value: 'manual' } };
   const context = {
-    byId: id => nodes[id], draft: { hint: {}, apps: [{ id: 'one', letter: 'A', path: '/Applications/Example.app' }] },
+    byId: id => nodes[id], draft: { theme_revision: 1, hint: {}, apps: [{ id: 'one', letter: 'A', path: '/Applications/Example.app' }] },
     structuredClone, getLanguage: () => 'en', prefix: () => ['Alt'], normalizeHintScale: model.normalizeHintScale, t: value => value,
     document: { querySelector: selector => { assert.equal(selector, 'input[name=side]:checked'); return { value: 'left' }; } },
   };
@@ -45,6 +45,7 @@ test('saving carries scale with existing bindings and custom color, and rejects 
   assert.equal(config.apps[0].letter, 'A');
   assert.equal(config.prefix[0], 'Alt');
   assert.equal(config.language, 'en');
+  assert.equal(config.theme_revision, 1);
   for (const value of ['', '49', '150.5', '151']) {
     nodes['hint-scale'].value = value;
     assert.throws(() => context.collectConfig());
