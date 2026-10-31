@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addImports, normalizeLetter, shortcutWarnings, glyphs, hintApps, moveApp } from './model.js';
+import * as model from './model.js';
+
+test('macOS prefix controls show Mac keyboard names', () => {
+  const keys = ['Control', 'Alt', 'Shift', 'Super'];
+  assert.deepEqual(keys.map(key => model.prefixKeyLabel(key, 'macos')), ['Control', 'Option', 'Shift', 'Command']);
+});
+
+test('Windows prefix controls retain Windows keyboard names', () => {
+  const keys = ['Control', 'Alt', 'Shift', 'Super'];
+  assert.deepEqual(keys.map(key => model.prefixKeyLabel(key, 'windows')), ['Ctrl', 'Alt', 'Shift', 'Win']);
+});
 
 test('hint sorting excludes unbound apps and preserves manual order', () => {
   const apps = [{ id: 'c', letter: 'C' }, { id: 'off', letter: '' }, { id: 'a', letter: 'A' }];

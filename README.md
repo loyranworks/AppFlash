@@ -33,7 +33,7 @@
 
 ## 快捷键与应用管理
 
-- Prefix 支持 Ctrl、Alt、Shift、Win（macOS 为 Command）及其组合，至少选一个。
+- Prefix 在 Windows 上显示 Ctrl、Alt、Shift、Win，在 macOS 上显示 Control、Option、Shift、Command；支持这些键的组合，至少选一个。
 - 每个应用一个唯一 A–Z 字母，输入大小写均可。留空字母可保留条目但暂不绑定。
 - 同时最多绑定 26 个应用；列表最多保留 500 个条目，可滚动而不会无限拉长窗口。
 - 点击应用或字母圆框编辑名称、地址与字母。添加、删除与排序在保存后生效。

@@ -33,7 +33,7 @@ Existing paths are skipped and cannot be selected again. Same names with differe
 
 ## Shortcuts and application management
 
-Prefix supports Control, Alt, Shift and Windows (Command on macOS), individually or together. Select at least one. Letters are case-insensitive and unique. Leave a letter blank to keep an entry disabled. Up to 26 apps can be bound; up to 500 entries can be stored in the scrollable list.
+Prefix supports Ctrl, Alt, Shift and Win on Windows, or Control, Option, Shift and Command on macOS, individually or together. Select at least one. Letters are case-insensitive and unique. Leave a letter blank to keep an entry disabled. Up to 26 apps can be bound; up to 500 entries can be stored in the scrollable list.
 
 Click an app or its circular letter badge to edit. Adding, deleting and reordering take effect after saving. Registration failures attempt to restore old bindings. Failed rollback explicitly asks you to quit and reopen AppFlash.
 

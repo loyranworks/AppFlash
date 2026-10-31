@@ -12,7 +12,7 @@ func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
 }
 
 func requireAccess() throws {
-    if !AXIsProcessTrusted() { throw NativeFailure(message: "请在系统设置 → 隐私与安全性 → 辅助功能中授权 AppFlash 原生组件，然后重试。") }
+    if !AXIsProcessTrusted() { throw NativeFailure(message: "请在系统设置的辅助功能（设备控制和数据访问）中授权 AppFlash，然后退出并重新打开 AppFlash。") }
 }
 
 func checkedSet(_ element: AXUIElement, _ key: String, _ value: CFTypeRef) throws {
@@ -61,14 +61,15 @@ func handle(_ request: [String: Any]) throws -> Any {
             guard let list = attribute(element, kAXWindowsAttribute) as? [AXUIElement] else { throw NativeFailure(message: "无法读取目标应用窗口；请检查辅助功能授权。") }
             let focused = attribute(element, kAXFocusedWindowAttribute)
             for window in list {
-                let title = attribute(window, kAXTitleAttribute) as? String ?? ""
-                if title.isEmpty { continue }
+                let minimized = attribute(window, kAXMinimizedAttribute) as? Bool ?? false
+                guard attribute(window, kAXRoleAttribute) as? String == kAXWindowRole,
+                      minimized || attribute(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole else { continue }
                 let existing = stored.first { $0.value.app.processIdentifier == app.processIdentifier && CFEqual($0.value.element, window) }
                 let id = existing?.key ?? nextID
                 if existing == nil { nextID += 1 }
                 stored[id] = StoredWindow(element: window, app: app)
                 live.insert(id)
-                windows.append(["id": id, "minimized": attribute(window, kAXMinimizedAttribute) as? Bool ?? false])
+                windows.append(["id": id, "minimized": minimized])
                 if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier, let focused = focused, CFEqual(focused, window) { active = id }
             }
         }
@@ -84,25 +85,39 @@ func handle(_ request: [String: Any]) throws -> Any {
     }
     if command == "activate" {
         try checkedSet(window.element, kAXMinimizedAttribute, kCFBooleanFalse)
-        _ = window.app.activate(options: [.activateIgnoringOtherApps])
-        if AXUIElementPerformAction(window.element, kAXRaiseAction as CFString) != .success { throw NativeFailure(message: "系统拒绝置前窗口") }
+        let mainStatus = AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        let activated = window.app.activate(options: [])
+        if mainStatus != .success && AXUIElementPerformAction(window.element, kAXRaiseAction as CFString) != .success {
+            throw NativeFailure(message: "系统拒绝置前窗口")
+        }
+        if !activated && !window.app.isActive { throw NativeFailure(message: "系统拒绝激活目标应用") }
         return true
     }
     throw NativeFailure(message: "不支持的原生命令")
 }
 
-while let line = readLine() {
-    autoreleasepool {
-        let response: [String: Any]
-        do {
-            guard let data = line.data(using: .utf8), let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NativeFailure(message: "无效请求") }
-            response = ["data": try handle(request)]
-        } catch {
-            response = ["error": (error as? NativeFailure)?.message ?? error.localizedDescription]
-        }
-        if let data = try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]) {
-            FileHandle.standardOutput.write(data)
-            FileHandle.standardOutput.write(Data([10]))
+let helperApp = NSApplication.shared
+helperApp.setActivationPolicy(.prohibited)
+// NSWorkspace refreshes application state on the main run loop. Read stdin off
+// that thread, but serialize AppKit and accessibility work on the main thread.
+DispatchQueue.global(qos: .userInitiated).async {
+    while let line = readLine() {
+        DispatchQueue.main.sync {
+            autoreleasepool {
+                let response: [String: Any]
+                do {
+                    guard let data = line.data(using: .utf8), let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw NativeFailure(message: "无效请求") }
+                    response = ["data": try handle(request)]
+                } catch {
+                    response = ["error": (error as? NativeFailure)?.message ?? error.localizedDescription]
+                }
+                if let data = try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]) {
+                    FileHandle.standardOutput.write(data)
+                    FileHandle.standardOutput.write(Data([10]))
+                }
+            }
         }
     }
+    DispatchQueue.main.async { helperApp.terminate(nil) }
 }
+helperApp.run()

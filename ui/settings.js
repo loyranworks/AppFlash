@@ -1,4 +1,4 @@
-import { addImports, normalizeLetter, shortcutWarnings, moveApp } from './model.js';
+import { addImports, normalizeLetter, shortcutWarnings, moveApp, prefixKeyLabel } from './model.js';
 import { badge, element, loadIcon } from './shared.js';
 import { initializeUpdates } from './updates.js';
 import { t, setLanguage, getLanguage, translatePage, message, errorMessage } from './i18n.js';
@@ -73,7 +73,7 @@ function renderState() {
   byId('hint-order').value = draft.hint.order;
   document.querySelector(`input[name=side][value=${draft.hint.side}]`).checked = true;
   byId('letter-color').value = draft.hint.color;
-  byId('super-name').textContent = state.platform === 'macos' ? '⌘' : 'Win';
+  for (const label of document.querySelectorAll('[data-prefix-key]')) label.textContent = prefixKeyLabel(label.dataset.prefixKey, state.platform);
   byId('access').hidden = state.platform !== 'macos';
   message(byId('pause'), state.paused ? '恢复切换' : '暂停切换');
   message(byId('save-status'), state.paused ? '快捷切换已暂停' : '已加载 · 无需重启');

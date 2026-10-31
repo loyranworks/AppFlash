@@ -1,5 +1,12 @@
 import { t } from './i18n.js';
 
+export function prefixKeyLabel(key, platform) {
+  const labels = platform === 'macos'
+    ? { Control: 'Control', Alt: 'Option', Shift: 'Shift', Super: 'Command' }
+    : { Control: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Win' };
+  return labels[key] ?? key;
+}
+
 export function normalizeLetter(value) {
   const letter = value.trim().toUpperCase();
   if (!/^[A-Z]?$/.test(letter)) throw new Error(t('字母必须是一个 A–Z，留空表示暂不启用。'));

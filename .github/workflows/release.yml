@@ -24,8 +24,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "AppFlash $GITHUB_REF_NAME" --generate-notes
-          release_id=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")
+          if release_id=$(gh release view "$GITHUB_REF_NAME" --json databaseId --jq .databaseId 2>/dev/null); then
+            :
+          else
+            release_id=$(gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="$GITHUB_REF_NAME" \
+              -f name="AppFlash $GITHUB_REF_NAME" \
+              -F draft=true \
+              -F generate_release_notes=true \
+              --jq .id)
+          fi
           [[ "$release_id" =~ ^[0-9]+$ ]] || { echo "Expected exactly one release"; exit 1; }
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
   build:
