@@ -42,8 +42,8 @@
 **Files:** 五个版本文件、发布说明与本计划。
 
 - [x] 固定证书候选构建、原位升级和真实快捷键验收，恢复配置。
-- [ ] 提交 GitHub、统一发版、核对三平台与公开附件签名、摘要及更新入口。
-- [ ] 明确报告物理双屏热插拔尚未本机实测，提供 MBP 更新与复核步骤。
+- [x] 提交 GitHub、统一发版、核对三平台与公开附件签名、摘要及更新入口。
+- [x] 明确报告物理双屏热插拔尚未本机实测，提供 MBP 更新与复核步骤。
 
 ## 证据与过程中发现的问题
 
@@ -58,3 +58,13 @@
 - 独立审查已关闭冷启动 Important 回归，流程与几何函数检查通过；实际运行时脚本的离开目标断言从“非 Source”收紧为精确 Anchor，并使用已经取得的三轮记录重核通过。
 
 Mini 只有一块活动显示器。未物理测试 MBP 双屏/三屏或热插拔；未控制宿主 Codex/ChatGPT。原配置与后台运行已恢复，临时 fixture 已退出。不能把模拟多屏元数据或单屏实机通过说成真实多屏已验收。
+
+## 正式发布与恢复
+
+- 发行提交 `0fcaec8b7b12675171baa34ba7eab3a171791501`，标签 `v0.1.15`；[Actions 41267851868](https://github.com/loyranworks/AppFlash/actions/runs/41267851868) 的 prepare、Apple Silicon、Intel、Windows 和 publish 全部成功。
+- [Release 430331613](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.15) 于 2026-11-01 03:18:18 UTC 正式发布，公开正文包含多屏机制、实测及未覆盖范围。
+- 九个附件全部匿名下载，大小与 GitHub API SHA-256 一致；三个更新包通过原客户端公钥、版本 0.1.15 及篡改拒绝测试。两个 Mac 架构的更新归档和只读 DMG 内应用均通过严格固定签名、公有 pin、designated requirement、标识、版本与架构检查；两张 DMG 均已卸载。公开 latest 更新入口返回 0.1.15。
+- 正式产物证据：`/tmp/appflash-release-v0115/{release,download-verification,package-verification,latest-from-endpoint}.json`。本机运行的是已验收的固定证书候选 0.1.15，正式包另行抽验，不将两者声称为同一二进制。
+- 最终只读复核 PID 30761 在后台运行，原配置与安装前逐字节相同；证据 `restore-final-verification.json`。原 0.1.14 回滚副本移出 Applications，保留于 `/tmp/appflash-multidisplay-0115/rollback-original-0.1.14.app`，未删除。
+- 按全局约定执行 `dot-doctor`，命令退出 0，但报告既有链接、dotfiles 未提交/未推送、顶层目录和 SSH 公钥备份权限待处理；未把退出码等同于自检无问题，也未修改无关系统配置。完整输出在本轮临时证据目录的 `dot-doctor.log`。
+- MBP 可在「通用 → 检查更新」升级，先复核 Hermes 位于内屏全屏、外接屏有其他应用时的 Control+H，再核对三屏与插拔后的第一次操作。此步骤用于补齐本机无法完成的物理多屏验收。
