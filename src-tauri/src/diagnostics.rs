@@ -1,13 +1,16 @@
 //! Small local-only diagnostics. Retention uses UTC calendar days: today and the
 //! previous six days. Only regular `appflash-YYYY-MM-DD.log` files are owned.
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
-use time::{Date, Duration, Month, OffsetDateTime};
+use time::{
+    format_description::well_known::Rfc3339, Date, Duration, Month, OffsetDateTime, UtcOffset,
+};
 
 const DAILY_LIMIT: u64 = 2 * 1024 * 1024;
 const CAP_MARKER: &str = "[diagnostics] daily 2 MiB limit reached; further entries skipped.\n";
@@ -44,12 +47,24 @@ pub fn maintenance() {
     }
 }
 
-pub fn export(destination: &Path) -> Result<(), String> {
+pub fn export(destination: &Path, offset_minutes: i32) -> Result<(), String> {
     LOGGER
         .get()
         .ok_or_else(|| "Local diagnostics are unavailable (initialization failed).".to_string())?
-        .export_at(destination, SystemTime::now())
+        .export_at(destination, SystemTime::now(), offset_minutes)
         .map_err(|error| format!("Could not export local diagnostics: {error}"))
+}
+
+pub fn export_name(version: &str, now: SystemTime, offset_minutes: i32) -> io::Result<String> {
+    let local = utc(now)?.to_offset(display_offset(offset_minutes)?);
+    Ok(format!(
+        "AppFlash-diagnostics-v{}-{}-{:02}{:02}{:02}.txt",
+        version,
+        date_text(local.date()),
+        local.hour(),
+        local.minute(),
+        local.second()
+    ))
 }
 
 impl Logger {
@@ -134,15 +149,23 @@ impl Logger {
         Ok(())
     }
 
-    pub fn export_at(&self, destination: &Path, now: SystemTime) -> io::Result<()> {
+    pub fn export_at(
+        &self,
+        destination: &Path,
+        now: SystemTime,
+        offset_minutes: i32,
+    ) -> io::Result<()> {
+        let offset = display_offset(offset_minutes)?;
         let timestamp = utc(now)?;
+        let local = timestamp.to_offset(offset);
         let today = timestamp.date();
         let earliest = today - Duration::days(6);
         let mut contents = format!(
-            "AppFlash local diagnostics\nVersion: {}\nSystem: {} / {}\nExported: {} (UTC)\nRetention: {} through {} (seven UTC calendar days)\n\n",
+            "AppFlash local diagnostics\nVersion: {}\nSystem: {} / {}\nExported: {} (local)\nExported UTC: {}\nDisplay time zone: UTC{}\nRetention: {} through {} (seven UTC storage days)\nEvent timestamps below use the display time zone; raw log files remain UTC.\n\n",
             self.version, std::env::consts::OS, std::env::consts::ARCH,
-            timestamp_text(timestamp), date_text(earliest), date_text(today),
+            timestamp_text(local), timestamp_text(timestamp), offset_text(offset), date_text(earliest), date_text(today),
         );
+        let mut snapshots = Vec::new();
         {
             let _guard = self
                 .access
@@ -181,13 +204,50 @@ impl Logger {
                 File::open(path)?
                     .take(DAILY_LIMIT)
                     .read_to_string(&mut text)?;
-                contents.push_str(&format!("--- {} (UTC) ---\n", date_text(date)));
-                contents.push_str(&text);
-                if !text.ends_with('\n') {
-                    contents.push('\n');
+                snapshots.push((date, text));
+            }
+        }
+        // Convert outside the append mutex: exporting must not hold window
+        // diagnostics up while formatting a large retained history.
+        let mut days: BTreeMap<Date, Vec<String>> = BTreeMap::new();
+        let mut latest_event: Option<OffsetDateTime> = None;
+        for (stored_date, text) in snapshots {
+            let mut context_day = stored_date;
+            for line in text.lines() {
+                if let Some((prefix, remainder)) = line.split_once(' ') {
+                    if let Ok(event) = OffsetDateTime::parse(prefix, &Rfc3339) {
+                        let event = event.to_offset(offset);
+                        latest_event =
+                            Some(latest_event.map_or(event, |previous| previous.max(event)));
+                        context_day = event.date();
+                        days.entry(context_day).or_default().push(format!(
+                            "{} {}",
+                            timestamp_text(event),
+                            remainder
+                        ));
+                        continue;
+                    }
                 }
+                days.entry(context_day).or_default().push(line.to_owned());
+            }
+        }
+        contents.push_str(&format!(
+            "Latest event: {}\n\n",
+            latest_event
+                .map(timestamp_text)
+                .unwrap_or_else(|| "none".into())
+        ));
+        for (day, lines) in days {
+            contents.push_str(&format!(
+                "--- {} (UTC{}) ---\n",
+                date_text(day),
+                offset_text(offset)
+            ));
+            for line in lines {
+                contents.push_str(&line);
                 contents.push('\n');
             }
+            contents.push('\n');
         }
         // Slow destination IO happens after releasing the append mutex.
         let mut file = File::create(destination)?;
@@ -216,11 +276,38 @@ fn date_text(date: Date) -> String {
 
 fn timestamp_text(timestamp: OffsetDateTime) -> String {
     format!(
-        "{}T{:02}:{:02}:{:02}Z",
+        "{}T{:02}:{:02}:{:02}{}",
         date_text(timestamp.date()),
         timestamp.hour(),
         timestamp.minute(),
-        timestamp.second()
+        timestamp.second(),
+        if timestamp.offset().is_utc() {
+            "Z".into()
+        } else {
+            offset_text(timestamp.offset())
+        }
+    )
+}
+
+fn display_offset(minutes: i32) -> io::Result<UtcOffset> {
+    // JavaScript getTimezoneOffset is UTC minus local time.
+    if !(-840..=840).contains(&minutes) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid display time-zone offset",
+        ));
+    }
+    UtcOffset::from_whole_seconds(-minutes * 60)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
+}
+
+fn offset_text(offset: UtcOffset) -> String {
+    let seconds = offset.whole_seconds();
+    format!(
+        "{}{:02}:{:02}",
+        if seconds < 0 { '-' } else { '+' },
+        seconds.abs() / 3600,
+        (seconds.abs() % 3600) / 60
     )
 }
 

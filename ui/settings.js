@@ -239,7 +239,7 @@ async function exportLogs() {
   status.className = 'footnote';
   message(status, '正在导出日志…');
   try {
-    const path = await invoke('export_logs');
+    const path = await invoke('export_logs', { timezoneOffsetMinutes: new Date().getTimezoneOffset() });
     message(status, path ? '已导出到 {path}' : '', { path });
   } catch (error) {
     status.className = 'error';

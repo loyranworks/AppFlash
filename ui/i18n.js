@@ -70,6 +70,7 @@ export const english = {
 const nativeErrors = {
   '此窗口不能导出日志。': 'This window cannot export logs.',
   '无法读取导出位置：': 'Cannot read export location: ',
+  '无法生成导出文件名：': 'Cannot create export file name: ',
   '导出任务未完成：': 'Log export did not complete: ',
   '导出日志失败：': 'Log export failed: ',
   '目标应用暂时没有响应，请在桌面切换完成后重试。': 'The target app is temporarily unresponsive. Try again after the desktop switch finishes.',

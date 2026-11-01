@@ -165,7 +165,7 @@ fn export_has_context_and_only_retained_days_in_chronological_order() {
     }
     fs::write(temp.0.join("other.log"), "private unrelated content").unwrap();
     let output = temp.0.join("diagnostics.txt");
-    logger.export_at(&output, january(8, 123)).unwrap();
+    logger.export_at(&output, january(8, 123), 0).unwrap();
     let content = fs::read_to_string(output).unwrap();
     assert!(
         content.contains("AppFlash") && content.contains("0.1.test") && content.contains("UTC")
@@ -188,9 +188,9 @@ fn invalid_paths_report_errors_without_panicking() {
     logger
         .record_at(january(8, 0), "switch", "success")
         .unwrap();
-    assert!(logger.export_at(&temp.0, january(8, 0)).is_err());
+    assert!(logger.export_at(&temp.0, january(8, 0), 0).is_err());
     assert!(logger
-        .export_at(&temp.0.join("missing/report.txt"), january(8, 0))
+        .export_at(&temp.0.join("missing/report.txt"), january(8, 0), 0)
         .is_err());
     let invalid_directory = temp.0.join("plain-file");
     fs::write(&invalid_directory, "keep").unwrap();
@@ -204,7 +204,7 @@ fn invalid_paths_report_errors_without_panicking() {
         .is_err());
     assert!(logger.maintenance_at(january(8, 0)).is_err());
     assert!(logger
-        .export_at(&temp.0.join("report.txt"), january(8, 0))
+        .export_at(&temp.0.join("report.txt"), january(8, 0), 0)
         .is_err());
     fs::remove_file(&temp.0).unwrap();
 }
@@ -232,10 +232,51 @@ fn owned_looking_symlinks_are_preserved_and_never_followed() {
         .record_at(january(8, 0), "switch", "overwrite")
         .is_err());
     logger
-        .export_at(&temp.0.join("report.txt"), january(8, 0))
+        .export_at(&temp.0.join("report.txt"), january(8, 0), 0)
         .unwrap();
     assert!(!fs::read_to_string(temp.0.join("report.txt"))
         .unwrap()
         .contains("untouched"));
     assert_eq!(fs::read_to_string(target).unwrap(), "untouched");
+}
+
+#[test]
+fn export_shows_the_local_day_when_utc_is_still_yesterday() {
+    let temp = TempDirectory::new();
+    let logger = Logger::new(temp.0.clone(), "0.1.new").unwrap();
+    let now = january(8, 23 * 3600 + 50 * 60);
+    logger
+        .record_at(now, "switch.error", "latest focus failure")
+        .unwrap();
+    let destination = temp.0.join("local.txt");
+    logger
+        .export_at(&destination, now + Duration::from_secs(10), -480)
+        .unwrap();
+    let text = fs::read_to_string(destination).unwrap();
+    assert!(
+        text.contains("Exported: 2025-01-09T07:50:10+08:00"),
+        "{text}"
+    );
+    assert!(text.contains("--- 2025-01-09"));
+    assert!(text.contains("Latest event: 2025-01-09T07:50:00+08:00"));
+    assert!(text.contains("2025-01-09T07:50:00+08:00 [switch.error] latest focus failure"));
+    let west = temp.0.join("west.txt");
+    logger.export_at(&west, january(9, 2 * 3600), 300).unwrap();
+    assert!(fs::read_to_string(west)
+        .unwrap()
+        .contains("Exported: 2025-01-08T21:00:00-05:00"));
+}
+
+#[test]
+fn export_names_identify_version_and_local_snapshot_and_reject_invalid_offsets() {
+    let now = january(8, 23 * 3600 + 59 * 60);
+    let first = diagnostics::export_name("0.1.new", now, -480).unwrap();
+    let next = diagnostics::export_name("0.1.new", now + Duration::from_secs(1), -480).unwrap();
+    assert_eq!(first, "AppFlash-diagnostics-v0.1.new-2025-01-09-075900.txt");
+    assert_ne!(first, next);
+    let temp = TempDirectory::new();
+    let logger = Logger::new(temp.0.clone(), "test").unwrap();
+    let destination = temp.0.join("invalid.txt");
+    assert!(logger.export_at(&destination, now, i32::MAX).is_err());
+    assert!(!destination.exists());
 }

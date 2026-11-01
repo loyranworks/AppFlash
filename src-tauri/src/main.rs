@@ -25,6 +25,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 async fn export_logs(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
+    timezone_offset_minutes: i32,
 ) -> Result<Option<String>, String> {
     if window.label() != "settings" {
         return Err("此窗口不能导出日志。".into());
@@ -38,6 +39,12 @@ async fn export_logs(
         .language
         == "en";
     tauri::async_runtime::spawn_blocking(move || {
+        let name = diagnostics::export_name(
+            &app.package_info().version.to_string(),
+            std::time::SystemTime::now(),
+            timezone_offset_minutes,
+        )
+        .map_err(|error| format!("无法生成导出文件名：{error}"))?;
         let selected = app
             .dialog()
             .file()
@@ -47,7 +54,7 @@ async fn export_logs(
             } else {
                 "导出诊断日志"
             })
-            .set_file_name("AppFlash-diagnostics.txt")
+            .set_file_name(&name)
             .add_filter("Text", &["txt"])
             .blocking_save_file();
         let Some(selected) = selected else {
@@ -56,7 +63,8 @@ async fn export_logs(
         let path = selected
             .into_path()
             .map_err(|error| format!("无法读取导出位置：{error}"))?;
-        diagnostics::export(&path).map_err(|error| format!("导出日志失败：{error}"))?;
+        diagnostics::export(&path, timezone_offset_minutes)
+            .map_err(|error| format!("导出日志失败：{error}"))?;
         diagnostics::record("export", "TXT diagnostics exported");
         Ok(Some(path.to_string_lossy().into_owned()))
     })

@@ -14,10 +14,18 @@ function exportHarness(invoke) {
     error: { textContent: 'existing validation error' },
   };
   const draft = { apps: [{ name: 'Unsaved application' }], hint: { scale: 80 } };
-  const context = { byId: id => nodes[id], invoke, message, errorMessage, draft, dirty: true };
+  const context = { byId: id => nodes[id], invoke, message, errorMessage, draft, dirty: true, Date: class { getTimezoneOffset() { return -480; } } };
   runInNewContext(source.slice(start, source.indexOf('initializeNavigation();', start)), context);
   return { nodes, context, draft };
 }
+
+test('export passes the current local time-zone offset to the native snapshot', async () => {
+  let received;
+  const { nodes } = exportHarness(async (command, args) => { received = { command, args }; return null; });
+  await nodes['export-logs'].click();
+  assert.equal(received.command, 'export_logs');
+  assert.equal(received.args?.timezoneOffsetMinutes, -480);
+});
 
 test('export disables duplicate actions, reports the saved path and preserves unsaved settings', async () => {
   let resolve; let calls = 0;

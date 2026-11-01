@@ -1,6 +1,6 @@
 [package]
 name = "app-flash"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 
 [build-dependencies]
@@ -14,7 +14,7 @@ tauri = { version = "=2.12.5", features = ["tray-icon", "image-png", "macos-priv
 tauri-plugin-global-shortcut = "=2.4.1"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
-time = { version = "=0.3.55", features = ["formatting"] }
+time = { version = "=0.3.55", features = ["formatting", "parsing"] }
 base64 = "=0.22.1"
 png = "=0.17.16"
 window-vibrancy = "=0.8.1"
