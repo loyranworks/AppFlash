@@ -26,7 +26,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 pub struct Runtime {
     pub data: Mutex<Data>,
     pub changing: AtomicBool,
-    pub editing: AtomicBool,
+    pub settings: crate::settings_guard::SettingsGuard,
     pub sender: Sender<KeyEvent>,
     #[cfg(target_os = "macos")]
     pub input_gate: crate::macos_input::Gate,
@@ -169,7 +169,7 @@ pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
 
 pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
     let runtime = app.state::<Arc<Runtime>>();
-    if runtime.changing.load(Ordering::SeqCst) || runtime.editing.load(Ordering::SeqCst) {
+    if runtime.changing.load(Ordering::SeqCst) {
         return;
     }
     let data = runtime.data.lock().unwrap();
@@ -181,6 +181,13 @@ pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
             .map(|key| key.id() == id)
             .unwrap_or(false)
     }) {
+        if runtime.settings.blocks_key(
+            pressed,
+            &mut runtime.notices.lock().unwrap(),
+            Instant::now(),
+        ) {
+            return;
+        }
         #[cfg(target_os = "macos")]
         let event = if pressed {
             let Some(permit) = runtime.input_gate.try_begin() else {
@@ -257,7 +264,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             unreadable,
         }),
         changing: AtomicBool::new(false),
-        editing: AtomicBool::new(true),
+        settings: crate::settings_guard::SettingsGuard::default(),
         sender,
         #[cfg(target_os = "macos")]
         input_gate: crate::macos_input::Gate::default(),
@@ -322,7 +329,11 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             held.retain(|letter: &String| platform::key_down(letter));
             if paused
                 || worker.changing.load(Ordering::SeqCst)
-                || worker.editing.load(Ordering::SeqCst)
+                || worker.settings.blocks_key(
+                    true,
+                    &mut worker.notices.lock().unwrap(),
+                    Instant::now(),
+                )
             {
                 continue;
             }
@@ -429,7 +440,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             drop(data);
             let pressed = !paused
                 && !runtime.changing.load(Ordering::SeqCst)
-                && !runtime.editing.load(Ordering::SeqCst)
+                && !runtime.settings.is_dirty()
                 && hint.enabled
                 && platform::prefix_down(&prefix);
             let hint_ready = if pressed {

@@ -13,9 +13,10 @@ mod overlay_layout;
 mod overlay_notice;
 mod platform;
 mod runtime;
+mod settings_guard;
 mod switching;
 mod updates;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
@@ -94,6 +95,22 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
 #[tauri::command]
 fn get_state(app: tauri::AppHandle) -> runtime::Status {
     runtime::status(&app.state::<Arc<runtime::Runtime>>())
+}
+
+#[tauri::command]
+fn set_settings_dirty(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    dirty: bool,
+) -> Result<(), String> {
+    if window.label() != "settings" {
+        return Err("此窗口不能修改设置编辑状态。".into());
+    }
+    let runtime = app.state::<Arc<runtime::Runtime>>();
+    runtime
+        .settings
+        .set_dirty(dirty, &mut runtime.notices.lock().unwrap());
+    Ok(())
 }
 
 #[tauri::command]
@@ -299,6 +316,7 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             get_state,
+            set_settings_dirty,
             set_language,
             save_config,
             set_paused,
@@ -359,11 +377,7 @@ fn main() {
             refresh_icon(app.handle());
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            if std::env::args().any(|argument| argument == "--background") {
-                app.state::<Arc<runtime::Runtime>>()
-                    .editing
-                    .store(false, Ordering::SeqCst);
-            } else {
+            if !std::env::args().any(|argument| argument == "--background") {
                 show_settings(app.handle());
             }
             Ok(())
@@ -372,22 +386,9 @@ fn main() {
             if window.label() != "settings" {
                 return;
             }
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    window
-                        .state::<Arc<runtime::Runtime>>()
-                        .editing
-                        .store(false, Ordering::SeqCst);
-                }
-                tauri::WindowEvent::Focused(focused) => {
-                    window
-                        .state::<Arc<runtime::Runtime>>()
-                        .editing
-                        .store(*focused, Ordering::SeqCst);
-                }
-                _ => {}
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .build(tauri::generate_context!());

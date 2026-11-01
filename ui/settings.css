@@ -31,3 +31,6 @@
 .scale-option input[type=number]{width:55px}
 .scale-option button{white-space:nowrap;padding:5px 7px}
 .diagnostics #export-status{margin-bottom:0;overflow-wrap:anywhere}.diagnostics #export-status:empty{display:none}.diagnostics #logs-note{margin-bottom:0}.diagnostics button{white-space:nowrap}
+#save-bar.save-pending{padding:12px;border:1px solid #d5a46b;border-left:4px solid #ad631e;border-radius:10px;background:#fff0dc;color:#773f13;box-shadow:0 2px 10px #9b601014}
+#save-bar.save-pending #save-status{font-size:12px;font-weight:600;line-height:1.7;text-wrap:pretty}
+#save-bar.save-pending #save{flex:none}

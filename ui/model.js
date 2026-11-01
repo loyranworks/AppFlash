@@ -1,5 +1,21 @@
 import { t } from './i18n.js';
 
+export function sameSettings(first, second) {
+  if (first === second) return true;
+  if (!first || !second || typeof first !== 'object' || typeof second !== 'object') return false;
+  if (Array.isArray(first) !== Array.isArray(second)) return false;
+  const keys = Object.keys(first);
+  return keys.length === Object.keys(second).length && keys.every(key => {
+    if (!Object.hasOwn(second, key)) return false;
+    let left = first[key]; let right = second[key];
+    // Modifier order has no meaning to the native binding registry. Color
+    // inputs normalize valid hex letters to lowercase when loading settings.
+    if (key === 'prefix' && Array.isArray(left) && Array.isArray(right)) { left = [...left].sort(); right = [...right].sort(); }
+    if (key === 'color' && typeof left === 'string' && typeof right === 'string') { left = left.toLowerCase(); right = right.toLowerCase(); }
+    return sameSettings(left, right);
+  });
+}
+
 export function prefixKeyLabel(key, platform) {
   const labels = platform === 'macos'
     ? { Control: 'Control', Alt: 'Option', Shift: 'Shift', Super: 'Command' }

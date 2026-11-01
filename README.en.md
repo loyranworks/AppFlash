@@ -15,9 +15,9 @@ A focused Windows / macOS application switcher. Hold your chosen prefix and pres
 1. Open AppFlash. No application bindings are preconfigured.
 2. Select **Applications** and choose a prefix; the recommended default is **Alt**. Multiple checked modifiers must be held together.
 3. Open **Applications**, import or add apps, and assign unique letters A–Z.
-4. Click **Save & apply**, close Settings, and press your shortcut. For Chrome assigned C, use **Alt + C**.
+4. Click **Save & apply** and try your shortcut immediately; Settings can stay open. For Chrome assigned C, use **Alt + C**.
 
-Closing Settings keeps AppFlash running. The Windows tray / macOS menu bar offers Settings, pause / resume and Quit. On macOS, opening AppFlash again from Finder restores Settings, including a minimized window. Pausing releases registered shortcuts. Switching is suspended while Settings is focused to prevent accidental activation.
+Closing Settings keeps AppFlash running. The Windows tray / macOS menu bar offers Settings, pause / resume and Quit. On macOS, opening AppFlash again from Finder restores Settings, including a minimized window. Pausing releases registered shortcuts. Saved settings allow shortcuts immediately, even with Settings open. Unsaved changes pause switching, with a prominent footer message and an edge tip when a shortcut is attempted. Save or restore the original values to resume. Closing Settings preserves the draft and its pause; an explicit manual pause remains independent.
 
 ## Batch import
 

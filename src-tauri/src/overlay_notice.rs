@@ -33,6 +33,15 @@ impl Notices {
     pub fn clear(&mut self) {
         self.current = None;
     }
+    pub fn clear_message(&mut self, message: &str) {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|(_, notice)| notice.message == message)
+        {
+            self.clear();
+        }
+    }
     pub fn present(&self, now: Instant, hint_ready: bool) -> Presentation {
         let notice = self
             .current

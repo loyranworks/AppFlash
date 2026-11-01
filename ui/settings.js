@@ -1,4 +1,4 @@
-import { addImports, normalizeLetter, shortcutWarnings, moveApp, prefixKeyLabel, normalizeHintScale } from './model.js';
+import { addImports, normalizeLetter, shortcutWarnings, moveApp, prefixKeyLabel, normalizeHintScale, sameSettings } from './model.js';
 import { badge, element, loadIcon } from './shared.js';
 import { initializeUpdates } from './updates.js';
 import { t, setLanguage, getLanguage, translatePage, message, errorMessage } from './i18n.js';
@@ -12,9 +12,35 @@ let dirty = false;
 let editingId;
 let importRows = [];
 let pendingSave;
+let editInitial;
+let changeVersion = 0;
+let reportedDirty;
+let settingsSync = Promise.resolve();
 
 function showError(error) { errorMessage(byId('error'), error); }
-function changed() { dirty = true; message(byId('save-status'), '有待保存的修改'); }
+function syncSettingsDirty() {
+  if (reportedDirty === dirty) return settingsSync;
+  const next = dirty;
+  reportedDirty = next;
+  // IPC handlers may finish asynchronously. Preserve the order of transitions,
+  // especially an edit immediately followed by reverting or saving it.
+  settingsSync = settingsSync.catch(() => {}).then(() => invoke('set_settings_dirty', { dirty: next })).catch(error => {
+    reportedDirty = undefined;
+    throw error;
+  });
+  return settingsSync;
+}
+function changed() {
+  if (!state) return;
+  changeVersion++;
+  try { dirty = !sameSettings(collectConfig(), state.config); }
+  catch { dirty = true; }
+  if (byId('edit-dialog').open && !sameSettings(editInitial, ['edit-name', 'edit-path', 'edit-letter'].map(id => byId(id).value))) dirty = true;
+  if (byId('import-dialog').open && importRows.some(row => row.checkbox.checked && !row.checkbox.disabled)) dirty = true;
+  byId('save-bar').classList.toggle('save-pending', dirty);
+  message(byId('save-status'), dirty ? '有未保存修改 · 快捷切换已暂停，请保存' : state.paused ? '快捷切换已暂停' : '设置已保存 · 可直接使用快捷切换');
+  void syncSettingsDirty().catch(showError);
+}
 function prefix() { return [...document.querySelectorAll('#prefix-options input:checked')].map(input => input.value); }
 
 function updateTheme() {
@@ -81,7 +107,7 @@ function renderState() {
   message(byId('save-status'), state.paused ? '快捷切换已暂停' : '已加载 · 无需重启');
   byId('config-path').textContent = state.config_path;
   if (state.error) showError(state.error);
-  updateTheme(); renderApps(); dirty = false;
+  updateTheme(); renderApps(); changed();
 }
 
 function edit(app) {
@@ -90,6 +116,7 @@ function edit(app) {
   byId('edit-name').value = app?.name ?? '';
   byId('edit-path').value = app?.path ?? '';
   byId('edit-letter').value = app?.letter ?? '';
+  editInitial = ['edit-name', 'edit-path', 'edit-letter'].map(id => byId(id).value);
   errorMessage(byId('edit-error'), '');
   byId('delete-app').hidden = !app;
   byId('edit-dialog').showModal();
@@ -113,11 +140,14 @@ byId('delete-app').addEventListener('click', () => {
 });
 byId('cancel-edit').addEventListener('click', () => byId('edit-dialog').close());
 byId('add').addEventListener('click', () => edit());
+for (const id of ['edit-name', 'edit-path', 'edit-letter']) byId(id).addEventListener('input', changed);
+for (const id of ['edit-dialog', 'import-dialog']) byId(id).addEventListener('close', changed);
 
 async function scanImports() {
   if (byId('refresh-import').disabled) return;
   byId('refresh-import').disabled = true;
   importRows = [];
+  changed();
   errorMessage(byId('import-error'), '');
   byId('import-list').replaceChildren(element('p', 'footnote', t('正在扫描当前有窗口的应用…')));
   byId('confirm-import').disabled = true;
@@ -128,12 +158,13 @@ async function scanImports() {
     for (const app of apps) {
       const row = element('label', 'import-row');
       const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', t('选择 {name}', { name: app.name }));
+      checkbox.addEventListener('change', changed);
       const image = element('img', 'app-image'); image.alt = '';
       const text = element('div', 'app-text'); const path = element('p', 'path', app.path); path.title = app.path;
       text.append(element('strong', '', app.name), path);
       const letter = element('input', 'import-letter'); letter.maxLength = 1; letter.placeholder = '—'; letter.setAttribute('aria-label', t('{name} 的字母', { name: app.name }));
       letter.addEventListener('click', event => event.stopPropagation());
-      letter.addEventListener('input', () => { checkbox.checked = true; });
+      letter.addEventListener('input', () => { checkbox.checked = true; changed(); });
       const key = path => state.platform === 'windows' ? path.replaceAll('/', '\\').toLowerCase() : path;
       const existing = draft.apps.some(other => key(other.path) === key(app.path));
       if (existing) { checkbox.disabled = true; letter.disabled = true; letter.title = t('已在列表中'); }
@@ -178,9 +209,18 @@ function collectConfig() {
 }
 
 async function save(config) {
+  if (byId('save').disabled) return;
+  const version = changeVersion;
   byId('save').disabled = true; byId('language').disabled = true; message(byId('save-status'), '正在检查绑定并保存…'); showError('');
-  try { state = await invoke('save_config', { config }); renderState(); message(byId('save-status'), state.paused ? '已保存 · 切换仍暂停' : '已保存并生效 · 无需重启'); }
-  catch (error) { showError(error); message(byId('save-status'), String(error).includes('回滚失败') ? '绑定恢复失败，请退出重开' : '未保存，原绑定保持不变'); }
+  try {
+    await syncSettingsDirty();
+    state = await invoke('save_config', { config });
+    // A slow save must not overwrite input made after its snapshot was sent.
+    if (version === changeVersion) renderState(); else changed();
+    await settingsSync;
+    if (!dirty) message(byId('save-status'), state.paused ? '已保存 · 切换仍暂停' : '已保存并生效 · 无需重启');
+  }
+  catch (error) { showError(error); changed(); if (!dirty) message(byId('save-status'), String(error).includes('回滚失败') ? '绑定恢复失败，请退出重开' : '未保存，原绑定保持不变'); }
   finally { byId('save').disabled = false; byId('language').disabled = false; }
 }
 
@@ -189,11 +229,11 @@ byId('save').addEventListener('click', () => {
     const config = collectConfig();
     const warnings = shortcutWarnings(config.prefix, state.platform);
     if (warnings.length) { pendingSave = config; byId('confirm-text').textContent = warnings.join(' '); byId('confirm-dialog').showModal(); }
-    else save(config);
+    else return save(config);
   } catch (error) { showError(error); }
 });
 byId('cancel-confirm').addEventListener('click', () => { pendingSave = undefined; byId('confirm-dialog').close(); });
-byId('accept-confirm').addEventListener('click', () => { const config = pendingSave; pendingSave = undefined; byId('confirm-dialog').close(); if (config) save(config); });
+byId('accept-confirm').addEventListener('click', () => { const config = pendingSave; pendingSave = undefined; byId('confirm-dialog').close(); if (config) return save(config); });
 byId('pause').addEventListener('click', async () => {
   byId('pause').disabled = true;
   try { const next = await invoke('set_paused', { paused: !state.paused }); state.paused = next.paused; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme(); if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '快捷切换已恢复'); }
@@ -257,6 +297,7 @@ byId('language').addEventListener('change', async () => {
   try {
     await invoke('set_language', { language: selected });
     setLanguage(selected); state.config.language = selected; draft.language = selected;
+    changed();
     translatePage();
     const scroll = byId('app-list').scrollTop; renderApps(); byId('app-list').scrollTop = scroll; updateTheme();
     message(byId('language-status'), '语言已保存');
@@ -273,6 +314,7 @@ try {
     state.paused = event.payload; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme();
   });
   state = await invoke('get_state'); renderState(); byId('language').disabled = false;
+  await settingsSync;
   await initializeUpdates({ invoke, listen: window.__TAURI__.event.listen, hasUnsavedChanges: () => dirty, version: await window.__TAURI__.app.getVersion() });
   try {
     byId('autostart').checked = await invoke('get_autostart');
