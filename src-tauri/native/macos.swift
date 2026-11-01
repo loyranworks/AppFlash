@@ -487,55 +487,165 @@ func departureWindows(_ app: NSRunningApplication, deadline: Date) -> [StoredWin
     return result
 }
 
-func prepareToHide(_ app: NSRunningApplication, windows: [StoredWindow], deadline: Date) throws {
+// Wait for the destination's display, not for every source window worldwide.
+// CG frames and display bounds are both in Quartz coordinates, including
+// negative origins. Unknown/reconfiguring geometry cannot prove settlement.
+func departureHasSettled(_ destination: StoredWindow, fullScreen: [StoredWindow], deadline: Date) -> Bool {
+    guard Date() < deadline, let displays = activeQuartzDisplayBounds(), !displays.isEmpty,
+          let inventory = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+    func record(_ window: StoredWindow) -> [String: Any]? {
+        guard let number = window.number else { return nil }
+        return inventory.first {
+            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == number &&
+            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == window.app.processIdentifier
+        }
+    }
+    func frame(_ value: [String: Any]) -> CGRect? {
+        guard let bounds = value[kCGWindowBounds as String] as? [String: Any],
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              rect.origin.x.isFinite, rect.origin.y.isFinite,
+              rect.width.isFinite, rect.height.isFinite, rect.width > 0, rect.height > 0 else { return nil }
+        return rect
+    }
+    func intersects(_ a: CGRect, _ b: CGRect) -> Bool {
+        let overlap = a.intersection(b)
+        return !overlap.isNull && overlap.width > 0 && overlap.height > 0
+    }
+    guard let target = record(destination),
+          (target[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true,
+          let targetFrame = frame(target) else { return false }
+    let targetDisplays = displays.filter { intersects($0, targetFrame) }
+    guard !targetDisplays.isEmpty else { return false }
+    for window in fullScreen {
+        guard Date() < deadline, let info = record(window) else { return false }
+        // CGWindow.h defines omission of this optional key as offscreen.
+        // A missing record or malformed present value is still unknown.
+        guard let rawVisibility = info[kCGWindowIsOnscreen as String] else { continue }
+        guard let visible = (rawVisibility as? NSNumber)?.boolValue else { return false }
+        if !visible { continue }
+        guard let sourceFrame = frame(info), displays.contains(where: { intersects($0, sourceFrame) }),
+              !targetDisplays.contains(where: { intersects($0, sourceFrame) }) else { return false }
+    }
+    return Date() < deadline
+}
+
+// Returns whether this call activated a destination and thus warrants a fresh
+// inventory. Already-inactive sources may attempt hide without any activation;
+// setHidden independently confirms the actual application-hidden state.
+func prepareToHide(_ app: NSRunningApplication, windows: [StoredWindow], deadline: Date) throws -> Bool {
     let appWindows = windows.filter { $0.app.processIdentifier == app.processIdentifier }
     let fullScreen = appWindows.filter { attribute($0.element, "AXFullScreen") as? Bool == true }
-    guard !fullScreen.isEmpty else { return }
-    let discovery = CrossSpaceWindowDiscovery.shared
+    guard !fullScreen.isEmpty else { return false }
     let source = AXUIElementCreateApplication(app.processIdentifier)
-    func sourceIsAway() -> Bool {
-        attribute(source, kAXFrontmostAttribute) as? Bool == false && fullScreen.allSatisfy { discovery.isOnscreen($0.element) == false }
-    }
-    if sourceIsAway() { return }
-    // Activating Finder without a real window can leave its menu bar active ON
-    // the source's fullscreen Space. Raise a verified window in another running
-    // app instead. Never launch, unminimize a destination, exit fullscreen, move
-    // windows, or change desktop preferences. A successful destination is cached.
-    var attempted: [AXUIElement] = []
-    func tryDestination(_ window: StoredWindow) -> Bool {
-        let attemptDeadline = min(deadline, Date(timeIntervalSinceNow: 0.7))
-        guard window.app.processIdentifier != app.processIdentifier,
-              !attempted.contains(where: { CFEqual($0, window.element) }),
-              departureWindowIsEligible(window, deadline: attemptDeadline) else { return false }
-        attempted.append(window.element)
-        do { try activate(window, deadline: attemptDeadline) } catch { return false }
-        while Date() < attemptDeadline {
-            if hasExactFocus(window, deadline: attemptDeadline) && sourceIsAway() {
-                lastDepartureWindow = window
-                return true
-            }
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    var selected: StoredWindow?
+    var stage = "source-state"
+    var success = false
+    defer {
+        if traceWindowControl {
+            let displays = activeQuartzDisplayBounds().map { String($0.count) } ?? "unknown"
+            FileHandle.standardError.write(Data("TRACE departure source_pid=\(app.processIdentifier) target_pid=\(selected?.app.processIdentifier ?? 0) target_window=\(selected?.number ?? 0) front_pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) displays=\(displays) stage=\(stage) ok=\(success)\n".utf8))
         }
+    }
+    func sourceIsInactive() -> Bool {
+        guard Date() < deadline,
+              attribute(source, kAXFrontmostAttribute) as? Bool == false,
+              let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
+        return front > 0 && front != app.processIdentifier
+    }
+    // Visibility is global across displays. A fullscreen window may remain on
+    // the laptop while another app has focus on the external screen. Allow the
+    // actual hide to proceed; setHidden still verifies AXHidden, not this hint.
+    if sourceIsInactive() {
+        stage = "already-inactive"
+        success = true
         return false
     }
-    if let cached = lastDepartureWindow {
-        if tryDestination(cached) { return }
-        lastDepartureWindow = nil
+    guard Date() < deadline,
+          attribute(source, kAXFrontmostAttribute) as? Bool == true,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+        throw NativeFailure(message: "桌面焦点尚未稳定，请稍后重试；目标应用尚未收起。")
     }
+    func orderedLayout(_ bounds: [CGRect]) -> [CGRect] {
+        bounds.sorted {
+            if $0.origin.x != $1.origin.x { return $0.origin.x < $1.origin.x }
+            if $0.origin.y != $1.origin.y { return $0.origin.y < $1.origin.y }
+            if $0.width != $1.width { return $0.width < $1.width }
+            return $0.height < $1.height
+        }
+    }
+    guard let initialBounds = activeQuartzDisplayBounds(), !initialBounds.isEmpty else {
+        throw NativeFailure(message: "屏幕布局尚未就绪，请稍后重试；目标应用尚未收起。")
+    }
+    let initialLayout = orderedLayout(initialBounds)
+    func requireLayout() throws {
+        guard let current = activeQuartzDisplayBounds(), !current.isEmpty,
+              orderedLayout(current) == initialLayout else {
+            throw NativeFailure(message: "屏幕布局发生变化，已停止切换；请稍后重新按快捷键。")
+        }
+    }
+    // Select using read-only inventory, then activate ONE exact destination.
+    // A failure must not turn one shortcut into a tour of unrelated apps.
+    // All processes belonging to this collapse are excluded as destinations.
+    let sourcePIDs = Set(windows.map { $0.app.processIdentifier })
     let apps = NSWorkspace.shared.runningApplications.filter {
-        $0.activationPolicy == .regular && !$0.isTerminated && !$0.isHidden && $0.processIdentifier != app.processIdentifier
+        $0.activationPolicy == .regular && !$0.isTerminated && !$0.isHidden &&
+        $0.processIdentifier > 0 && !sourcePIDs.contains($0.processIdentifier)
     }.sorted {
         let leftFinder = $0.bundleIdentifier == "com.apple.finder"
         let rightFinder = $1.bundleIdentifier == "com.apple.finder"
         if leftFinder != rightFinder { return leftFinder }
         return ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast)
     }
-    for destination in apps where Date() < deadline {
-        for window in departureWindows(destination, deadline: deadline) where Date() < deadline {
-            if tryDestination(window) { return }
-        }
+    var inventories: [pid_t: [StoredWindow]] = [:]
+    func candidates(_ destination: NSRunningApplication) -> [StoredWindow] {
+        if let known = inventories[destination.processIdentifier] { return known }
+        let result = departureWindows(destination, deadline: deadline)
+        inventories[destination.processIdentifier] = result
+        return result
     }
-    throw NativeFailure(message: "未能切离目标全屏桌面；请保持另一个应用窗口可用后重试，目标应用尚未收起。")
+    func choose() -> StoredWindow? {
+        // Prefer an already visible window in WindowServer's front-to-back
+        // order, keeping the external display on its existing application.
+        let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for record in visible where Date() < deadline {
+            guard (record[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let pid = (record[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let number = (record[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let destination = apps.first(where: { $0.processIdentifier == pid }) else { continue }
+            if let window = candidates(destination).first(where: { $0.number == number }) { return window }
+        }
+        if let cached = lastDepartureWindow, Date() < deadline,
+           apps.contains(where: { $0.processIdentifier == cached.app.processIdentifier }),
+           departureWindowIsEligible(cached, deadline: deadline) { return cached }
+        for destination in apps where Date() < deadline {
+            if let window = candidates(destination).first { return window }
+        }
+        return nil
+    }
+    stage = "selection"
+    selected = choose()
+    lastDepartureWindow = nil
+    guard let window = selected, Date() < deadline else {
+        throw NativeFailure(message: "没有可用的其他应用窗口；目标应用尚未收起。")
+    }
+    let attemptDeadline = min(deadline, Date(timeIntervalSinceNow: 0.7))
+    stage = "activation"
+    try requireLayout()
+    try activate(window, deadline: attemptDeadline)
+    stage = "confirmation"
+    while Date() < attemptDeadline {
+        try requireLayout()
+        if hasExactFocus(window, deadline: attemptDeadline) && sourceIsInactive() &&
+           departureHasSettled(window, fullScreen: fullScreen, deadline: attemptDeadline) &&
+           NSWorkspace.shared.frontmostApplication?.processIdentifier == window.app.processIdentifier {
+            try requireLayout()
+            lastDepartureWindow = window
+            success = true
+            return true
+        }
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    }
+    throw NativeFailure(message: "未能切离目标全屏桌面，已停止继续切换；目标应用尚未收起。")
 }
 
 func collapse(_ windows: [StoredWindow]) throws {
@@ -553,7 +663,7 @@ func collapse(_ windows: [StoredWindow]) throws {
     if fullScreen {
         // Minimizing or changing AXFullScreen would destroy the user's Space.
         for app in apps.values {
-            try prepareToHide(app, windows: windows, deadline: deadline)
+            _ = try prepareToHide(app, windows: windows, deadline: deadline)
             try setHidden(app, true, deadline: deadline)
         }
     } else {
@@ -853,13 +963,16 @@ func handle(_ request: [String: Any]) throws -> Any {
             // existing safe departure, then let Rust replan this SAME key press.
             // Unknown CG-only surfaces never block operations on known windows.
             var prepared = Set<pid_t>()
+            var activatedDestination = false
             let deadline = Date(timeIntervalSinceNow: 2)
             for window in windows where attribute(window.element, "AXFullScreen") as? Bool == true {
                 if prepared.insert(window.app.processIdentifier).inserted {
-                    try prepareToHide(window.app, windows: windows, deadline: deadline)
+                    if try prepareToHide(window.app, windows: windows, deadline: deadline) {
+                        activatedDestination = true
+                    }
                 }
             }
-            if prepared.isEmpty { return NSNull() }
+            if !activatedDestination { return NSNull() }
             return try handle(["command": "snapshot", "path": request["path"]!])
         }
         try collapse(windows)

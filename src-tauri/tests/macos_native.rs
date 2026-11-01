@@ -48,3 +48,27 @@ fn missing_system_focus_requires_complete_exact_local_window_evidence() {
         .expect("Run exact local focus confirmation regression")
         .success());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fullscreen_departure_never_hops_between_apps_and_accepts_inactive_visible_source() {
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/test-macos-departure.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .status()
+        .expect("Run actual production departure control flow regression")
+        .success());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fullscreen_departure_waits_only_for_the_destination_display() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tools/test-macos-departure-visibility.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .status()
+        .expect("Run exact WindowServer per-display departure regression")
+        .success());
+}

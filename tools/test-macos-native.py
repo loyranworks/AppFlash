@@ -148,6 +148,9 @@ let source = CGEventSource(stateID: .hidSystemState)!
 print("ready")
 while let line = readLine() {
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+    guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+          (session["CGSSessionScreenIsLocked"] as? NSNumber)?.boolValue != true,
+          (session[kCGSessionOnConsoleKey as String] as? NSNumber)?.boolValue == true else { exit(5) }
     guard let expected = Int32(line), workspace.frontmostApplication?.processIdentifier == expected else { exit(2) }
     for down in [true, false] {
         let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
@@ -430,15 +433,15 @@ def main():
                 source_path = pathlib.Path(sys.argv[sys.argv.index("--native-source") + 1])
             native_source = source_path.read_text()
             print("Fullscreen helper source SHA-256:", hashlib.sha256(native_source.encode()).hexdigest(), flush=True)
-            needle = "    for destination in apps where Date() < deadline {"
+            needle = "    let apps = NSWorkspace.shared.runningApplications.filter {\n"
             assert native_source.count(needle) == 1
             identities = ["local.appflash.native-test." + fixture_id,
                           "local.appflash.departure-test." + fixture_id]
             if fullscreen_keyboard:
                 identities.append("local.appflash.anchor-test." + fixture_id)
             native_source = native_source.replace(needle,
-                "    for destination in apps where " + json.dumps(identities) +
-                '.contains(destination.bundleIdentifier ?? "") && Date() < deadline {', 1)
+                "    let apps = NSWorkspace.shared.runningApplications.filter { " + json.dumps(identities) +
+                '.contains($0.bundleIdentifier ?? "") }.filter {\n', 1)
             if missing_system_focus:
                 # Only the external system-wide query is unavailable; local
                 # AX, WindowServer, activation and actual keys remain real.
@@ -480,6 +483,14 @@ let app = NSApplication.shared
 let fixtureDelegate = FixtureDelegate()
 app.delegate = fixtureDelegate
 app.setActivationPolicy(.regular)
+func requireGUISession() {
+    guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+          (session["CGSSessionScreenIsLocked"] as? NSNumber)?.boolValue != true,
+          (session[kCGSessionOnConsoleKey as String] as? NSNumber)?.boolValue == true else {
+        fputs("AppFlash fixture refused GUI operation: console session is unavailable or locked\\n", stderr)
+        exit(9)
+    }
+}
 let applicationName = ProcessInfo.processInfo.processName
 let mainMenu = NSMenu()
 let applicationMenuItem = NSMenuItem()
@@ -502,6 +513,7 @@ let testKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { even
     return event
 }
 if CommandLine.arguments.contains("--windows") {
+    requireGUISession()
     for index in 0..<2 {
         let window = NSWindow(contentRect: NSRect(x: 100 + index * 80, y: 100, width: 360, height: 200), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "AppFlash native test \\(index + 1)"
@@ -530,12 +542,14 @@ if let statePath = statePath {
     signal(SIGUSR1, SIG_IGN)
     let signalSource = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
     signalSource.setEventHandler {
+        requireGUISession()
         if let window = windows.first { window.makeKeyAndOrderFront(nil); window.toggleFullScreen(nil) }
     }
     signalSource.resume()
     signal(SIGUSR2, SIG_IGN)
     let closeSource = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
     closeSource.setEventHandler {
+        requireGUISession()
         if windows.count > 1 {
             let closed = windows.removeLast()
             closed.close()
@@ -548,6 +562,7 @@ if let statePath = statePath {
     var selfHideRequests = 0
     let selfHideSource = DispatchSource.makeSignalSource(signal: SIGWINCH, queue: .main)
     selfHideSource.setEventHandler {
+        requireGUISession()
         selfHideRequests += 1
         app.hide(nil)
     }
@@ -559,6 +574,7 @@ if let statePath = statePath {
     var cgInventory: [[String: Any]] = []
     let inventorySource = DispatchSource.makeSignalSource(signal: SIGINFO, queue: .main)
     inventorySource.setEventHandler {
+        requireGUISession()
         if ProcessInfo.processInfo.environment["APPFLASH_REBUILD_FOCUS_ROOT"] != nil, let window = windows.first {
             window.orderOut(nil)
             window.orderFront(nil)
