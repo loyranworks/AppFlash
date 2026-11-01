@@ -280,3 +280,26 @@ fn export_names_identify_version_and_local_snapshot_and_reject_invalid_offsets()
     assert!(logger.export_at(&destination, now, i32::MAX).is_err());
     assert!(!destination.exists());
 }
+
+// Exercises the actual global producer, FIFO export, normalization and exit API.
+#[test]
+fn background_export_includes_accepted_sanitized_bounded_records_and_shutdown_closes_it() {
+    let temp = TempDirectory::new();
+    diagnostics::init(temp.0.clone(), "async-test").unwrap();
+    let category = format!("switch\n{}", "类".repeat(10_000));
+    let message = format!("accepted\r\n{}", "界".repeat(100_000));
+    diagnostics::record(&category, &message);
+    diagnostics::record("switch.done", "FIFO tail");
+    let output = temp.0.join("background.txt");
+    diagnostics::export(&output, -480).unwrap();
+    let text = fs::read_to_string(output).unwrap();
+    assert!(text.contains("Version: async-test"));
+    assert!(text.contains("Dropped log records (queue full/busy/closed): 0"));
+    let event = text.lines().find(|line| line.contains("accepted")).unwrap();
+    assert!(event.len() < 17_000);
+    assert!(event.ends_with('…'));
+    assert!(!text.contains(['\r', '\0', '\u{2028}']));
+    assert!(text.find("accepted").unwrap() < text.find("FIFO tail").unwrap());
+    diagnostics::shutdown(Duration::from_secs(5)).unwrap();
+    assert!(diagnostics::export(&temp.0.join("after-close.txt"), 0).is_err());
+}

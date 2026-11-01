@@ -312,6 +312,7 @@ try {
   await window.__TAURI__.event.listen('paused-changed', event => {
     if (!state) return;
     state.paused = event.payload; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme();
+    if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '设置已保存 · 可直接使用快捷切换');
   });
   state = await invoke('get_state'); renderState(); byId('language').disabled = false;
   await settingsSync;

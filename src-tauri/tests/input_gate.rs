@@ -1,6 +1,6 @@
-#[path = "../src/macos_input.rs"]
-mod macos_input;
-use macos_input::Gate;
+#[path = "../src/input_gate.rs"]
+mod input_gate;
+use input_gate::Gate;
 
 #[test]
 fn presses_during_a_blocked_switch_are_dropped_instead_of_replayed() {

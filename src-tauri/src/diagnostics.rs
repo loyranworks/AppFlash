@@ -12,10 +12,13 @@ use time::{
     format_description::well_known::Rfc3339, Date, Duration, Month, OffsetDateTime, UtcOffset,
 };
 
+#[path = "diagnostics_worker.rs"]
+mod worker;
+
 const DAILY_LIMIT: u64 = 2 * 1024 * 1024;
 const CAP_MARKER: &str = "[diagnostics] daily 2 MiB limit reached; further entries skipped.\n";
 const MESSAGE_LIMIT: usize = 16 * 1024;
-static LOGGER: OnceLock<Logger> = OnceLock::new();
+static LOGGER: OnceLock<worker::Worker> = OnceLock::new();
 
 pub struct Logger {
     directory: PathBuf,
@@ -25,7 +28,7 @@ pub struct Logger {
 
 pub fn init(directory: PathBuf, version: &str) -> io::Result<()> {
     let logger = Logger::new(directory, version)?;
-    let _ = logger.maintenance_at(SystemTime::now());
+    let logger = worker::Worker::start(logger)?;
     LOGGER.set(logger).map_err(|_| {
         io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -37,21 +40,23 @@ pub fn init(directory: PathBuf, version: &str) -> io::Result<()> {
 /// Recording failures are intentionally ignored and never recursively logged.
 pub fn record(category: &str, message: &str) {
     if let Some(logger) = LOGGER.get() {
-        let _ = logger.record_at(SystemTime::now(), category, message);
+        logger.record(worker::Entry::new(SystemTime::now(), category, message));
     }
 }
 
-pub fn maintenance() {
-    if let Some(logger) = LOGGER.get() {
-        let _ = logger.maintenance_at(SystemTime::now());
-    }
+/// Stop accepting records, disconnect the producer, and best-effort drain before
+/// the deadline. Slow storage may outlive this call until process termination.
+pub fn shutdown(timeout: std::time::Duration) -> io::Result<()> {
+    LOGGER
+        .get()
+        .map_or(Ok(()), |logger| logger.shutdown(timeout))
 }
 
 pub fn export(destination: &Path, offset_minutes: i32) -> Result<(), String> {
     LOGGER
         .get()
         .ok_or_else(|| "Local diagnostics are unavailable (initialization failed).".to_string())?
-        .export_at(destination, SystemTime::now(), offset_minutes)
+        .export(destination, SystemTime::now(), offset_minutes)
         .map_err(|error| format!("Could not export local diagnostics: {error}"))
 }
 
@@ -149,11 +154,24 @@ impl Logger {
         Ok(())
     }
 
+    /// Synchronous storage export. The background consumer orders this storage
+    /// work after accepted records; callers using Logger directly synchronize
+    /// through its append mutex.
     pub fn export_at(
         &self,
         destination: &Path,
         now: SystemTime,
         offset_minutes: i32,
+    ) -> io::Result<()> {
+        self.export_with_dropped(destination, now, offset_minutes, 0)
+    }
+
+    fn export_with_dropped(
+        &self,
+        destination: &Path,
+        now: SystemTime,
+        offset_minutes: i32,
+        dropped: u64,
     ) -> io::Result<()> {
         let offset = display_offset(offset_minutes)?;
         let timestamp = utc(now)?;
@@ -161,7 +179,7 @@ impl Logger {
         let today = timestamp.date();
         let earliest = today - Duration::days(6);
         let mut contents = format!(
-            "AppFlash local diagnostics\nVersion: {}\nSystem: {} / {}\nExported: {} (local)\nExported UTC: {}\nDisplay time zone: UTC{}\nRetention: {} through {} (seven UTC storage days)\nEvent timestamps below use the display time zone; raw log files remain UTC.\n\n",
+            "AppFlash local diagnostics\nVersion: {}\nSystem: {} / {}\nExported: {} (local)\nExported UTC: {}\nDisplay time zone: UTC{}\nRetention: {} through {} (seven UTC storage days)\nEvent timestamps below use the display time zone; raw log files remain UTC.\nDropped log records (queue full/busy/closed): {dropped}\n\n",
             self.version, std::env::consts::OS, std::env::consts::ARCH,
             timestamp_text(local), timestamp_text(timestamp), offset_text(offset), date_text(earliest), date_text(today),
         );
@@ -256,6 +274,26 @@ impl Logger {
     }
 }
 
+impl worker::Storage for Logger {
+    fn record(&mut self, entry: worker::Entry) -> io::Result<()> {
+        self.record_at(entry.now, &entry.category, &entry.message)
+    }
+
+    fn export(
+        &mut self,
+        destination: &Path,
+        now: SystemTime,
+        offset_minutes: i32,
+        dropped: u64,
+    ) -> io::Result<()> {
+        self.export_with_dropped(destination, now, offset_minutes, dropped)
+    }
+
+    fn maintenance(&mut self, now: SystemTime) -> io::Result<()> {
+        self.maintenance_at(now)
+    }
+}
+
 fn utc(now: SystemTime) -> io::Result<OffsetDateTime> {
     let nanoseconds = match now.duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_nanos() as i128,
@@ -340,4 +378,32 @@ fn single_line(text: &str, limit: usize) -> String {
         result.push(character);
     }
     result
+}
+
+#[cfg(test)]
+mod background_metadata_tests {
+    use super::*;
+
+    struct Directory(PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn real_storage_export_displays_dropped_total_even_without_any_log_record() {
+        let now = SystemTime::now();
+        let directory = Directory(std::env::temp_dir().join(format!(
+            "appflash-drop-report-{}-{}",
+            std::process::id(),
+            now.duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        let mut logger = Logger::new(directory.0.clone(), "test").unwrap();
+        let output = directory.0.join("export.txt");
+        worker::Storage::export(&mut logger, &output, now, 0, 42).unwrap();
+        let text = fs::read_to_string(output).unwrap();
+        assert!(text.contains("Dropped log records (queue full/busy/closed): 42"));
+        assert!(text.contains("Latest event: none"));
+    }
 }

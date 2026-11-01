@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-/// Own one switch from the input callback until the worker has finished it.
+/// On every platform, own one switch from the callback through worker completion.
 /// Busy presses are discarded before they can enter the channel.
 #[derive(Clone, Default)]
 pub struct Gate(Arc<State>);

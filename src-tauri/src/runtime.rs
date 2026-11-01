@@ -28,18 +28,14 @@ pub struct Runtime {
     pub changing: AtomicBool,
     pub settings: crate::settings_guard::SettingsGuard,
     pub sender: Sender<KeyEvent>,
-    #[cfg(target_os = "macos")]
-    pub input_gate: crate::macos_input::Gate,
+    pub input_gate: crate::input_gate::Gate,
     pub config_path: PathBuf,
     pub _instance: File,
     pub notices: Mutex<crate::overlay_notice::Notices>,
 }
 
 pub enum KeyEvent {
-    #[cfg(not(target_os = "macos"))]
-    Press(String),
-    #[cfg(target_os = "macos")]
-    Press(String, crate::macos_input::Permit),
+    Press(String, crate::input_gate::Permit),
     Release(String),
 }
 
@@ -188,7 +184,6 @@ pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
         ) {
             return;
         }
-        #[cfg(target_os = "macos")]
         let event = if pressed {
             let Some(permit) = runtime.input_gate.try_begin() else {
                 if std::env::var_os("APPFLASH_TRACE_WINDOW_CONTROL").is_some() {
@@ -197,12 +192,6 @@ pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
                 return;
             };
             KeyEvent::Press(app_id, permit)
-        } else {
-            KeyEvent::Release(app_id)
-        };
-        #[cfg(not(target_os = "macos"))]
-        let event = if pressed {
-            KeyEvent::Press(app_id)
         } else {
             KeyEvent::Release(app_id)
         };
@@ -266,8 +255,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         changing: AtomicBool::new(false),
         settings: crate::settings_guard::SettingsGuard::default(),
         sender,
-        #[cfg(target_os = "macos")]
-        input_gate: crate::macos_input::Gate::default(),
+        input_gate: crate::input_gate::Gate::default(),
         config_path: path,
         _instance: instance,
         notices: Mutex::new(notices),
@@ -308,12 +296,9 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             };
             // Keep the admission permit alive through native execution and all
             // early exits. Key-up still clears held state while busy presses
-            // never enter the queue, even when AX or a Space transition stalls.
+            // never enter the queue, even when the native backend stalls.
             let (id, _permit) = match event {
-                #[cfg(target_os = "macos")]
                 KeyEvent::Press(id, permit) => (id, permit),
-                #[cfg(not(target_os = "macos"))]
-                KeyEvent::Press(id) => (id, ()),
                 KeyEvent::Release(id) => {
                     let data = worker.data.lock().unwrap();
                     if let Some(entry) = data.config.apps.iter().find(|entry| entry.id == id) {
@@ -386,7 +371,6 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     began.elapsed().as_secs_f64()
                 );
             }
-            #[cfg(target_os = "macos")]
             {
                 let dropped = worker.input_gate.take_dropped();
                 if dropped > 0 {
@@ -425,14 +409,9 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         let mut last_notice = None;
         let mut notice_geometry = false;
         let mut next_attempt = Instant::now();
-        let mut last_maintenance = Instant::now();
         loop {
             std::thread::sleep(Duration::from_millis(25));
             let now = Instant::now();
-            if last_maintenance.elapsed() >= Duration::from_secs(3600) {
-                crate::diagnostics::maintenance();
-                last_maintenance = now;
-            }
             let data = runtime.data.lock().unwrap();
             let hint = data.config.hint.clone();
             let prefix = data.config.prefix.clone();

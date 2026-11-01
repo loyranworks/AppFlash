@@ -44,6 +44,7 @@ async function harness(initial = {}, platform = 'macos') {
   let paused = false;
   const controls = { save: null, report: null };
   const calls = [];
+  const events = new Map();
   const document = {
     documentElement: new Node(), getElementById: node,
     querySelector(selector) { return sides.find(side => selector.includes(`[value=${side.value}]`) || selector.includes(':checked') && side.checked); },
@@ -71,14 +72,14 @@ async function harness(initial = {}, platform = 'macos') {
     ...model, document, structuredClone, crypto: { randomUUID: () => 'new-app' },
     t, setLanguage, getLanguage, message, errorMessage,
     element: () => new Node(), badge: () => new Node(), loadIcon() {}, translatePage() {}, initializeNavigation() {}, initializeUpdates: async () => {},
-    window: { __TAURI__: { core: { invoke }, event: { listen: async () => {} }, app: { getVersion: async () => 'test' } } },
+    window: { __TAURI__: { core: { invoke }, event: { listen: async (name, callback) => { events.set(name, callback); } }, app: { getVersion: async () => 'test' } } },
   };
   const source = readFileSync(new URL('./settings.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
   await runInNewContext(`(async () => { ${source}\n globalThis.settings = { edit, save, changed, get dirty() { return dirty; }, get draft() { return draft; }, get state() { return state; }, flush: async () => { if (typeof settingsSync !== 'undefined') await settingsSync; } }; })()`, context);
   const settings = context.settings;
   await settings.flush();
   const reports = () => calls.filter(call => call.command === 'set_settings_dirty').map(call => call.args.dirty);
-  return { node, settings, calls, controls, reports, config, async input(id, value) { node(id).value = String(value); await node(id).dispatch('input'); await settings.flush(); } };
+  return { node, settings, calls, controls, reports, config, events, async input(id, value) { node(id).value = String(value); await node(id).dispatch('input'); await settings.flush(); } };
 }
 
 test('clean settings explicitly enable shortcuts without closing the window', async () => {
@@ -212,4 +213,36 @@ test('saving the draft keeps an explicit manual pause active', async () => {
   assert.equal(h.settings.state.paused, true);
   assert.match(h.node('save-status').textContent, /切换仍暂停/);
   assert.equal(h.calls.filter(call => call.command === 'set_paused').length, 1);
+});
+
+test('tray pause events update the footer and button on both platforms', async () => {
+  for (const platform of ['windows', 'macos']) {
+    const h = await harness({}, platform);
+    h.events.get('paused-changed')({ payload: true });
+    assert.equal(h.node('pause').textContent, '恢复切换');
+    assert.equal(h.node('save-status').textContent, '快捷切换已暂停');
+    h.events.get('paused-changed')({ payload: false });
+    assert.equal(h.node('pause').textContent, '暂停切换');
+    assert.equal(h.node('save-status').textContent, '设置已保存 · 可直接使用快捷切换');
+    assert.deepEqual(h.reports(), [false], 'A tray event does not change the draft');
+  }
+});
+
+test('tray resume keeps the unsaved warning and does not allow unsaved shortcuts', async () => {
+  const h = await harness({}, 'windows');
+  await h.input('hint-scale', 80);
+  h.events.get('paused-changed')({ payload: true });
+  h.events.get('paused-changed')({ payload: false });
+  assert.equal(h.settings.dirty, true);
+  assert.match(h.node('save-status').textContent, /未保存.*暂停/);
+  assert.equal(h.node('save-bar').classList.contains('save-pending'), true);
+  assert.equal(h.reports().at(-1), true);
+});
+
+test('tray pause feedback uses the saved interface language', async () => {
+  const h = await harness({ language: 'en' }, 'windows');
+  h.events.get('paused-changed')({ payload: true });
+  assert.equal(h.node('save-status').textContent, 'Switching paused');
+  h.events.get('paused-changed')({ payload: false });
+  assert.equal(h.node('save-status').textContent, 'Settings saved · shortcuts ready to use');
 });

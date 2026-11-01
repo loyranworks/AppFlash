@@ -3,10 +3,9 @@ mod bindings;
 mod config;
 mod diagnostics;
 mod icon;
+mod input_gate;
 #[cfg(target_os = "macos")]
 mod macos_cycle;
-#[cfg(target_os = "macos")]
-mod macos_input;
 #[cfg(target_os = "macos")]
 mod macos_overlay;
 mod overlay_layout;
@@ -394,6 +393,13 @@ fn main() {
         .build(tauri::generate_context!());
     match result {
         Ok(app) => app.run(|_app, _event| {
+            if matches!(&_event, tauri::RunEvent::Exit) {
+                if let Err(error) =
+                    crate::diagnostics::shutdown(std::time::Duration::from_millis(500))
+                {
+                    eprintln!("Local diagnostics could not finish before exit: {error}");
+                }
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_settings(_app);
