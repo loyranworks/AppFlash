@@ -6,7 +6,7 @@
 - [x] 将窗口焦点门禁换成未保存状态；接通所有编辑、取消与保存路径，更新明显提示和中英文本。
 - [x] 跑全套测试、格式及构建检查，审查异步保存期间的新编辑和恢复状态。
 - [x] 记录验证结果和实机验收范围。
-- [ ] 提交并发布 0.1.16，核对公开附件与更新入口。
+- [x] 提交并发布 0.1.16，核对公开附件与更新入口。
 
 边界：草稿在设置隐藏时保留，仍暂停；普通浏览、即时设置不阻止切换。保留手动暂停，不通过清除所有贴边错误解除草稿提示。
 
@@ -19,3 +19,11 @@
 - 暖色保存提示已截图目视检查。贴边通知由真实后端 guard 测试检查消息、六秒寿命、重复按键不重启动画、保存即清除且保留无关错误；本轮电脑操作工具只截取设置窗口，没有把贴边整屏像素称为已目视验收。Windows 实机未测，controller 与共享后端单测已覆盖。
 - 本轮控制器第一次无 PTY 收到 EOF，尚未发送测试键即清理；前台 PID 不符的尝试均拒绝，没有向其他应用发送按键。清理后检查发现 PTY 子进程重启没有保留，已在独立会话重启并确认真实存活。最终原配置逐字节恢复、fixture 已退出、后台候选 PID 18504 存活，无需重新授权。
 - 证据目录 `/tmp/appflash-settings-unsaved`，包括 `frontend-red.log`、`normalization-red.log`、`frontend-final.log`、`suite-final.log`、`build-final.log`、`acceptance.json` 与旧版回滚副本。原生 Swift 窗口控制没有修改。
+
+## 正式发布
+
+- 发行提交 `086a3c600d0d97ca4314eaaf731a5cb4ddbd9504`，标签 `v0.1.16`；[Actions 41270520288](https://github.com/loyranworks/AppFlash/actions/runs/41270520288) 的 prepare、Apple Silicon、Intel、Windows 和 publish 全部成功。
+- [Release 430345888](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.16) 于 2026-11-01 11:56:20（Asia/Shanghai）发布，公开正文已核对包含未保存提示及验证边界。
+- 九个公开附件匿名下载，大小和 GitHub API SHA-256 全匹配。三个更新包通过原客户端公钥、版本 0.1.16 与篡改拒绝测试；两个 Mac 架构的更新归档及只读 DMG 应用通过完整固定签名、pin、requirement、标识、版本和架构检查，挂载均已卸载。公开 latest 更新入口为 0.1.16。
+- 正式产物证据在 `/tmp/appflash-release-v0116/{release,download-verification,package-verification,latest-from-endpoint}.json`。Mini 当前运行已验收的本机候选，正式发行包另外下载校验，不将二者声称为同一二进制。
+- `dot-doctor` 已完成并退出 0，仍报告既有软链、未提交/未推送、顶层目录及 SSH 公钥备份权限待处理；未修改无关配置或将其宣称为检查无问题。最后再次只读确认候选 PID 18504 存活，原配置逐字节保持一致。
