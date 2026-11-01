@@ -19,8 +19,8 @@
 - [x] 日志代理仅修改 `diagnostics.rs`、对应测试及新日志辅助模块，先红后绿；给出根调用点需要的精确 API。
 - [x] 主线程先重现托盘状态红例，修复并覆盖干净、未保存与英语显示。
 - [x] 主线程共享 input gate，补慢执行与失败回收回归，保证窗口算法不变。
-- [x] 接通日志退出排空和运行时维护、全套测试、两平台 callback 分支检查、独立审查；Windows正式CI随标签触发。
-- [ ] 固定签名候选实机验收，恢复配置；统一 GitHub 发版并核验公开附件。
+- [x] 接通日志退出排空和运行时维护、全套测试、两平台 callback 分支检查、独立审查；Windows正式CI也已通过。
+- [x] 固定签名候选实机验收，恢复配置；统一 GitHub 发版并核验公开附件。
 - [x] 用官方资料对比共享核心/平台适配方案，单独报告长期建议，不在本版重构内核。
 - [x] 用户曾追加版本化备份与回滚，随后明确取消；本轮不新增回滚功能，恢复三项修复的发版范围。
 
@@ -43,3 +43,12 @@
 ## 长期架构建议的依据
 
 参考 [Qt QPA](https://doc.qt.io/qt-6/qpa.html) 的公共平台接口与不同平台后端，以及 [Tauri架构](https://v2.tauri.app/concept/architecture/) 对WebView/runtime的分层。针对本项目的建议是共享配置、暂停/输入准入、调度、日志与错误契约，用Rust trait包装平台端口，保留Win32与AX/Spaces机制和当前两种Cycle策略。共同契约测试加各平台实机验收后再逐项收敛产品语义，不直接把Mac算法移植到Windows；无需为外观统一而更换整个UI框架。此处为建议，不是本版已实现的完整重构。
+
+## 正式发布结果
+
+- 发行提交 `7ff98c6804fe3fc19e2a54e73569f1bbeb49fc55`，标签 `v0.1.17`；[Actions 41273108651](https://github.com/loyranworks/AppFlash/actions/runs/41273108651) 的prepare、两个macOS架构、Windows及publish全成功。Windows实际CI运行并通过npm test与NSIS构建；源callback受控回归仍不等同Windows原生窗口实机验收。
+- [Release 430360853](https://github.com/loyranworks/AppFlash/releases/tag/v0.1.17) 于2026-11-01 12:34:44（Asia/Shanghai）发布，公开正文已确认保留三项修复、完整重构未实施及实测边界。
+- 九个公开附件全部匿名下载，大小与GitHub API SHA-256匹配；三个更新包通过原客户端公钥、0.1.17签名版本及篡改拒绝测试。两个Mac架构的归档与只读DMG应用通过完整固定签名、pin、requirement、标识、版本及架构校验，挂载均已卸载。latest更新入口为0.1.17。
+- 正式产物记录在 `/tmp/appflash-release-v0117/{release,download-verification,package-verification,latest-from-endpoint}.json`。Mini当前运行已验收本地候选，正式发行包另行抽验，不将二者称为相同二进制。
+- 最后只读核对原配置逐字节相同、候选后台PID56209存活。旧0.1.16应用已在测试前移出Applications保留于本轮临时目录；fixture退出。dot-doctor已结束、退出0，仍报告既有软链/目录/同步与SSH公钥备份权限待处理，未改动无关系统配置。
+- 用户询问完整平台重构风险，已说明中等规模、一次合并算法可能导致回归；后续先保持线程/调用顺序/成功判断原样封装接口，分别完成Windows/Mac实机基线，再逐步迁移。没有在本版承诺或实现此重构。

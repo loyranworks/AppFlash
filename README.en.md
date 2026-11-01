@@ -19,6 +19,8 @@ A focused Windows / macOS application switcher. Hold your chosen prefix and pres
 
 Closing Settings keeps AppFlash running. The Windows tray / macOS menu bar offers Settings, pause / resume and Quit. On macOS, opening AppFlash again from Finder restores Settings, including a minimized window. Pausing releases registered shortcuts. Saved settings allow shortcuts immediately, even with Settings open. Unsaved changes pause switching, with a prominent footer message and an edge tip when a shortcut is attempted. Save or restore the original values to resume. Closing Settings preserves the draft and its pause; an explicit manual pause remains independent.
 
+While a switch is being processed, new presses are discarded instead of queued for later playback. Press again after it completes. Diagnostics are written in the background; exported TXT files show the number of discarded log records under contention.
+
 ## Batch import
 
 Import discovers applications **that currently have windows**, not every installed program.
