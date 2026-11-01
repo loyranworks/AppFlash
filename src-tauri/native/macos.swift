@@ -155,9 +155,12 @@ private final class CrossSpaceWindowDiscovery {
         return id
     }
 
-    func isOnscreen(number id: CGWindowID) -> Bool? {
+    func isOnscreen(number id: CGWindowID, owner: pid_t? = nil) -> Bool? {
         guard let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        return visible.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
+        return visible.contains {
+            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id &&
+            (owner == nil || ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == owner)
+        }
     }
 
     func isOnscreen(_ window: AXUIElement) -> Bool? {
@@ -563,20 +566,78 @@ func collapse(_ windows: [StoredWindow]) throws {
     }
 }
 
-func hasExactFocus(_ window: StoredWindow, deadline: Date, observed: ((pid_t, Bool) -> Void)? = nil) -> Bool {
-    let system = AXUIElementCreateSystemWide()
-    guard Date() < deadline,
-          let focusedApp = attribute(system, kAXFocusedApplicationAttribute),
-          CFGetTypeID(focusedApp) == AXUIElementGetTypeID() else { return false }
-    let application = unsafeBitCast(focusedApp, to: AXUIElement.self)
+func acceptsLocalWindowConfirmation(systemStatus: AXError, frontMatches: Bool, axFrontmost: Bool?, localWindowMatches: Bool, hidden: Bool?, minimized: Bool?, onscreen: Bool) -> Bool {
+    let missing = systemStatus == .noValue || systemStatus == .attributeUnsupported || systemStatus == .notImplemented
+    return missing && frontMatches && axFrontmost == true && localWindowMatches && hidden == false && minimized == false && onscreen
+}
+
+struct FocusObservation {
     var pid: pid_t = 0
-    guard AXUIElementGetPid(application, &pid) == .success else { return false }
-    observed?(pid, false)
-    guard pid == window.app.processIdentifier, Date() < deadline,
-          let focusedWindow = attribute(application, kAXFocusedWindowAttribute) else { return false }
-    let exact = CFEqual(focusedWindow, window.element)
-    observed?(pid, exact)
-    return exact
+    var exact = false
+    var source = "unconfirmed"
+    var systemStatus: AXError = .failure
+    var systemWindowStatus: AXError?
+    var localWindowStatus: AXError?
+    var localExact = false
+    var onscreen = false
+    var trace: String {
+        "focus_source=\(source) system_status=\(systemStatus.rawValue) system_window_status=\(systemWindowStatus.map { String($0.rawValue) } ?? "unread") local_window_status=\(localWindowStatus.map { String($0.rawValue) } ?? "unread") local_exact=\(localExact) onscreen=\(onscreen)"
+    }
+}
+
+// Confirm the exact key window, not an editable control inside it. Some apps
+// omit the system-wide focused application even while their key window works.
+// A valid contrary system result always wins over local cached attributes.
+func hasExactFocus(_ window: StoredWindow, deadline: Date, observed: ((FocusObservation) -> Void)? = nil) -> Bool {
+    var observation = FocusObservation()
+    defer { observed?(observation) }
+    guard Date() < deadline, !window.app.isTerminated else { return false }
+    let system = AXUIElementCreateSystemWide()
+    let (status, focusedApp) = readAttribute(system, kAXFocusedApplicationAttribute)
+    observation.systemStatus = status
+    if status == .success {
+        guard let focusedApp = focusedApp, CFGetTypeID(focusedApp) == AXUIElementGetTypeID() else { return false }
+        let application = unsafeBitCast(focusedApp, to: AXUIElement.self)
+        guard AXUIElementGetPid(application, &observation.pid) == .success,
+              observation.pid == window.app.processIdentifier, Date() < deadline else { return false }
+        let (windowStatus, focusedWindow) = readAttribute(application, kAXFocusedWindowAttribute)
+        observation.systemWindowStatus = windowStatus
+        guard windowStatus == .success, let focusedWindow = focusedWindow,
+              CFGetTypeID(focusedWindow) == AXUIElementGetTypeID(), Date() < deadline else { return false }
+        observation.exact = CFEqual(focusedWindow, window.element)
+        if observation.exact { observation.source = "system_exact" }
+        return observation.exact
+    }
+    guard status == .noValue || status == .attributeUnsupported || status == .notImplemented,
+          Date() < deadline,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == window.app.processIdentifier else { return false }
+    let application = AXUIElementCreateApplication(window.app.processIdentifier)
+    let (localStatus, focusedWindow) = readAttribute(application, kAXFocusedWindowAttribute)
+    observation.localWindowStatus = localStatus
+    observation.localExact = localStatus == .success && focusedWindow.map {
+        CFGetTypeID($0) == AXUIElementGetTypeID() && CFEqual($0, window.element)
+    } == true
+    guard observation.localExact, Date() < deadline else { return false }
+    var owner: pid_t = 0
+    guard AXUIElementGetPid(window.element, &owner) == .success,
+          owner == window.app.processIdentifier else { return false }
+    let frontmost = attribute(application, kAXFrontmostAttribute) as? Bool
+    guard Date() < deadline else { return false }
+    let hidden = attribute(application, kAXHiddenAttribute) as? Bool
+    guard Date() < deadline else { return false }
+    let minimized = attribute(window.element, kAXMinimizedAttribute) as? Bool
+    guard Date() < deadline else { return false }
+    observation.onscreen = window.number.flatMap {
+        CrossSpaceWindowDiscovery.shared.isOnscreen(number: $0, owner: owner)
+    } == true
+    let frontMatches = !window.app.isTerminated &&
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == owner
+    observation.exact = Date() < deadline && acceptsLocalWindowConfirmation(
+        systemStatus: status, frontMatches: frontMatches, axFrontmost: frontmost,
+        localWindowMatches: observation.localExact, hidden: hidden, minimized: minimized,
+        onscreen: observation.onscreen)
+    if observation.exact { observation.source = "local_exact_fallback" }
+    return observation.exact
 }
 
 // Hidden apps can rebuild their AXWindow nodes while retaining the same actual
@@ -615,11 +676,12 @@ func activate(_ original: StoredWindow, deadline suppliedDeadline: Date? = nil) 
     var rebounds = 0
     var focusedPID: pid_t = 0
     var exact = false
+    var focusTrace = "focus_source=unconfirmed"
     var actions = "not-sent"
     var success = false
     defer {
         if traceWindowControl {
-            FileHandle.standardError.write(Data("TRACE focus target_pid=\(window.app.processIdentifier) front_pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) focused_pid=\(focusedPID) exact=\(exact) repairs=\(repairs) rebounds=\(rebounds) ok=\(success) \(actions)\n".utf8))
+            FileHandle.standardError.write(Data("TRACE focus target_pid=\(window.app.processIdentifier) front_pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) focused_pid=\(focusedPID) exact=\(exact) repairs=\(repairs) rebounds=\(rebounds) ok=\(success) \(focusTrace) \(actions)\n".utf8))
         }
     }
     func requireTime() throws {
@@ -666,7 +728,9 @@ func activate(_ original: StoredWindow, deadline suppliedDeadline: Date? = nil) 
         try requireTime()
         focusedPID = 0
         exact = false
-        if hasExactFocus(window, deadline: deadline, observed: { focusedPID = $0; exact = $1 }) { success = true; return }
+        if hasExactFocus(window, deadline: deadline, observed: {
+            focusedPID = $0.pid; exact = $0.exact; focusTrace = $0.trace
+        }) { success = true; return }
         if repairs < 2 && Date() >= nextRepair {
             nextRepair = Date(timeIntervalSinceNow: 0.12)
             let stale = readAttribute(window.element, kAXRoleAttribute).0 == .invalidUIElement

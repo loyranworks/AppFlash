@@ -36,3 +36,15 @@ fn idle_discovered_roots_are_not_starved_by_public_window_validation() {
         .expect("Run native candidate admission regression")
         .success());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn missing_system_focus_requires_complete_exact_local_window_evidence() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tools/test-macos-focus-confirmation.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .status()
+        .expect("Run exact local focus confirmation regression")
+        .success());
+}

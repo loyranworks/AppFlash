@@ -1,6 +1,7 @@
 """Exercise the real long-lived helper without requiring Accessibility access."""
 
 import json
+import hashlib
 import os
 import pathlib
 import plistlib
@@ -133,17 +134,27 @@ def fullscreen_keyboard_controls(helper, path, application, destination_path, de
             if actual and check(actual):
                 return actual
             time.sleep(0.02)
-        raise AssertionError({"fixture": index, "state": state(index)})
+        raise AssertionError({"fixture": index, "state": state(index),
+                              "process_exit": processes[index].poll(),
+                              "stderr": (root / ("source.stderr" if index == 0 else "departure.stderr")).read_text()})
 
     key_source = root / "key.swift"
     key_binary = root / "send-key"
-    key_source.write_text('''import ApplicationServices
+    key_source.write_text('''import AppKit
+import ApplicationServices
+setbuf(stdout, nil)
+let workspace = NSWorkspace.shared
 let source = CGEventSource(stateID: .hidSystemState)!
-for down in [true, false] {
-    let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
-    event.flags = []
-    event.post(tap: .cghidEventTap)
-    usleep(20000)
+print("ready")
+while let line = readLine() {
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+    guard let expected = Int32(line), workspace.frontmostApplication?.processIdentifier == expected else { exit(2) }
+    for down in [true, false] {
+        let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
+        event.flags = []
+        event.post(tap: .cghidEventTap)
+    }
+    print("sent")
 }
 ''')
     subprocess.run(["swiftc", str(key_source), "-o", str(key_binary)], check=True)
@@ -160,27 +171,49 @@ for down in [true, false] {
         return reply["data"]["windows"][0]["id"]
 
     ids = [target(0), target(1)]
-    for round_index in range(4):
-        for index in range(2):
-            if rebuild_root and index == 0:
-                previous_generation = state(index)["inventory_requests"]
-                previous_number = state(index)["windows"][0]["window_number"]
-                processes[index].send_signal(signal.SIGINFO)
-                wait(index, lambda s: s["inventory_requests"] > previous_generation)
-                assert state(index)["windows"][0]["window_number"] == previous_number
-            reply = request(helper, {"command": "activate", "id": ids[index]})
-            assert reply == {"data": True}, {"round": round_index, "fixture": index, "reply": reply, "state": state(index)}
-            actual = wait(index, lambda s: s["active"] and not s["hidden"] and s["windows"][0]["key"] and s["windows"][0]["on_active_space"])
-            count = actual["test_key_count"]
-            # Never send test input unless the foreground is our own fixture.
-            subprocess.run([str(key_binary)], check=True)
-            wait(index, lambda s: s["test_key_count"] > count)
-            prepared = request(helper, {"command": "prepare-collapse", "path": str(paths[index]), "ids": [ids[index]]})
-            assert "data" in prepared, prepared
-            reply = request(helper, {"command": "collapse", "ids": [ids[index]]})
-            assert reply == {"data": True}, reply
-            wait(index, lambda s: s["hidden"] and s["fullscreen"])
-        print("Two fullscreen applications received real keyboard input and hid/restored, round", round_index + 1, flush=True)
+    key_sender = subprocess.Popen([str(key_binary)], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, text=True, bufsize=1)
+    try:
+        assert select.select([key_sender.stdout], [], [], 5)[0], "Test sender did not start"
+        assert key_sender.stdout.readline().strip() == "ready"
+        for round_index in range(4):
+            for index in range(2):
+                if rebuild_root and index == 0:
+                    previous_generation = state(index)["inventory_requests"]
+                    previous_number = state(index)["windows"][0]["window_number"]
+                    processes[index].send_signal(signal.SIGINFO)
+                    wait(index, lambda s: s["inventory_requests"] > previous_generation)
+                    assert state(index)["windows"][0]["window_number"] == previous_number
+                reply = request(helper, {"command": "activate", "id": ids[index]})
+                assert reply == {"data": True}, {"round": round_index, "fixture": index, "reply": reply, "state": state(index)}
+                actual = state(index)
+                count = actual["test_key_count"]
+                before_text = actual["windows"][0]["input_value"]
+                insertion = 4 + round_index
+                # Send immediately after native success, without waiting for focus
+                # to catch up. The sender itself guards our exact foreground PID.
+                began = time.monotonic()
+                key_sender.stdin.write(str(processes[index].pid) + "\n")
+                key_sender.stdin.flush()
+                assert select.select([key_sender.stdout], [], [], 1)[0], "Test sender stalled"
+                assert key_sender.stdout.readline().strip() == "sent", "Foreground was not the exact fixture"
+                assert time.monotonic() - began < 0.1, "Sender startup must not conceal activation lag"
+                expected_text = before_text[:insertion] + "a" + before_text[insertion:]
+                wait(index, lambda s: s["active"] and not s["hidden"] and
+                     s["windows"][0]["key"] and s["windows"][0]["on_active_space"] and
+                     s["test_key_count"] > count and
+                     s["windows"][0]["input_value"] == expected_text and
+                     s["windows"][0]["input_selection"] == insertion + 1)
+                prepared = request(helper, {"command": "prepare-collapse", "path": str(paths[index]), "ids": [ids[index]]})
+                assert "data" in prepared, prepared
+                reply = request(helper, {"command": "collapse", "ids": [ids[index]]})
+                assert reply == {"data": True}, reply
+                wait(index, lambda s: s["hidden"] and s["fullscreen"])
+            print("Two fullscreen applications received real keyboard input and hid/restored, round", round_index + 1, flush=True)
+    finally:
+        if key_sender.stdin:
+            key_sender.stdin.close()
+        stop(key_sender)
 
 
 def window_controls(helper, path, application, root, fullscreen=False, check_space=False, self_hide_probe=False):
@@ -379,13 +412,47 @@ def main():
     cold_fullscreen = "--cold-fullscreen" in sys.argv[2:]
     busy_target = "--busy-target" in sys.argv[2:]
     rebuild_focus_root = "--refresh-focus-root" in sys.argv[2:]
-    fullscreen_keyboard = "--fullscreen-keyboard" in sys.argv[2:] or rebuild_focus_root
+    missing_system_focus = "--missing-system-focus" in sys.argv[2:]
+    fullscreen_keyboard = "--fullscreen-keyboard" in sys.argv[2:] or rebuild_focus_root or missing_system_focus
     fullscreen = "--fullscreen" in sys.argv[2:] or self_hide_probe or cold_fullscreen or fullscreen_keyboard
     check_space = "--check-space" in sys.argv[2:]
     control_windows = "--window-control" in sys.argv[2:] or fullscreen or check_space or busy_target
     with tempfile.TemporaryDirectory(prefix="appflash-native-test-") as temporary:
         root = pathlib.Path(temporary)
         fixture_id = uuid.uuid4().hex
+        if fullscreen:
+            # GUI tests compile a production-source copy with a controlled
+            # destination inventory. Popen fixtures have no LaunchServices
+            # launchDate and otherwise sort behind personal apps, including
+            # the host. Never let a fullscreen test select those applications.
+            source_path = pathlib.Path(__file__).resolve().parent.parent / "src-tauri/native/macos.swift"
+            if "--native-source" in sys.argv:
+                source_path = pathlib.Path(sys.argv[sys.argv.index("--native-source") + 1])
+            native_source = source_path.read_text()
+            print("Fullscreen helper source SHA-256:", hashlib.sha256(native_source.encode()).hexdigest(), flush=True)
+            needle = "    for destination in apps where Date() < deadline {"
+            assert native_source.count(needle) == 1
+            identities = ["local.appflash.native-test." + fixture_id,
+                          "local.appflash.departure-test." + fixture_id]
+            if fullscreen_keyboard:
+                identities.append("local.appflash.anchor-test." + fixture_id)
+            native_source = native_source.replace(needle,
+                "    for destination in apps where " + json.dumps(identities) +
+                '.contains(destination.bundleIdentifier ?? "") && Date() < deadline {', 1)
+            if missing_system_focus:
+                # Only the external system-wide query is unavailable; local
+                # AX, WindowServer, activation and actual keys remain real.
+                needle = "func readAttribute(_ element: AXUIElement, _ key: String) -> (AXError, CFTypeRef?) {"
+                assert native_source.count(needle) == 1
+                native_source = native_source.replace(needle, needle + '''
+    if key == kAXFocusedApplicationAttribute && CFEqual(element, AXUIElementCreateSystemWide()) {
+        return (.noValue, nil)
+    }
+''', 1)
+            injected = root / "isolated-native.swift"
+            injected.write_text(native_source)
+            native = root / "isolated-native"
+            subprocess.run(["swiftc", "-O", str(injected), "-o", str(native)], check=True)
         fixture_name = "AppFlash Native Fixture " + fixture_id
         executable_name = "fixture-" + fixture_id
         fixture = root / (fixture_name + ".app")
@@ -428,6 +495,7 @@ applicationMenuItem.submenu = applicationMenu
 mainMenu.addItem(applicationMenuItem)
 app.mainMenu = mainMenu
 var windows: [NSWindow] = []
+var inputFields: [NSWindow: NSTextField] = [:]
 var testKeyCount = 0
 let testKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
     if event.keyCode == 0 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { testKeyCount += 1 }
@@ -442,7 +510,18 @@ if CommandLine.arguments.contains("--windows") {
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.restorationClass = nil
+        if ProcessInfo.processInfo.environment["APPFLASH_TEXT_FOCUS"] != nil {
+            let field = NSTextField(frame: NSRect(x: 20, y: 70, width: 300, height: 30))
+            field.stringValue = "0123456789"
+            window.contentView!.addSubview(field)
+            window.initialFirstResponder = field
+            inputFields[window] = field
+        }
         window.makeKeyAndOrderFront(nil)
+        if let field = inputFields[window] {
+            window.makeFirstResponder(field)
+            (field.currentEditor() as? NSTextView)?.setSelectedRange(NSRange(location: 4, length: 0))
+        }
         windows.append(window)
     }
 }
@@ -503,7 +582,7 @@ if let statePath = statePath {
     let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
         sample += 1
         let windowStates: [[String: Any]] = windows.map { window in
-            ["window_number": window.windowNumber, "identifier": window.identifier?.rawValue ?? "", "key": window.isKeyWindow, "main": window.isMainWindow, "on_active_space": window.isOnActiveSpace, "occlusion": window.occlusionState.rawValue, "occlusion_visible": window.occlusionState.contains(.visible), "fullscreen": window.styleMask.contains(.fullScreen), "minimized": window.isMiniaturized, "visible": window.isVisible]
+            ["window_number": window.windowNumber, "identifier": window.identifier?.rawValue ?? "", "key": window.isKeyWindow, "main": window.isMainWindow, "on_active_space": window.isOnActiveSpace, "occlusion": window.occlusionState.rawValue, "occlusion_visible": window.occlusionState.contains(.visible), "fullscreen": window.styleMask.contains(.fullScreen), "minimized": window.isMiniaturized, "visible": window.isVisible, "input_value": inputFields[window]?.stringValue ?? "", "input_selection": (inputFields[window]?.currentEditor() as? NSTextView)?.selectedRange().location ?? -1]
         }
         let state: [String: Any] = ["sample": sample, "test_key_count": testKeyCount, "inventory_requests": inventoryRequests, "cg_inventory": cgInventory, "self_hide_requests": selfHideRequests, "launched": fixtureDelegate.launched, "app_window_count": app.windows.count, "fullscreen": windows.first?.styleMask.contains(.fullScreen) ?? false, "fullscreen_phase": fullscreenPhase, "active": app.isActive, "hidden": app.isHidden, "windows": windowStates]
         if let data = try? JSONSerialization.data(withJSONObject: state) {
@@ -519,6 +598,7 @@ if let statePath = statePath {
         helper = None
         application = None
         departure = None
+        anchor = None
         try:
             if fullscreen:
                 # Keep focus-changing tests inside disposable fixtures. The
@@ -535,20 +615,64 @@ if let statePath = statePath {
                         "CFBundlePackageType": "APPL",
                     }, stream)
                 departure = subprocess.Popen([str(destination_executable), "--windows"],
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                             env=dict(os.environ, APPFLASH_FIXTURE_STATE=str(root / "departure-state.json")))
+                                             stdout=subprocess.DEVNULL, stderr=(root / "departure.stderr").open("w"),
+                                             env=dict(os.environ, APPFLASH_FIXTURE_STATE=str(root / "departure-state.json"),
+                                                      **({"APPFLASH_TEXT_FOCUS": "1"} if fullscreen_keyboard else {})))
+                if fullscreen_keyboard:
+                    # Both tested apps can be hidden by the cycle. A third
+                    # owned ordinary app must remain available for departure.
+                    # Never rely on Finder or another personal application.
+                    anchor_app = root / "AppFlash Anchor Fixture.app"
+                    anchor_executable = anchor_app / "Contents/MacOS/anchor"
+                    anchor_executable.parent.mkdir(parents=True)
+                    shutil.copy2(executable, anchor_executable)
+                    with (anchor_app / "Contents/Info.plist").open("wb") as stream:
+                        plistlib.dump({
+                            "CFBundleIdentifier": "local.appflash.anchor-test." + fixture_id,
+                            "CFBundleExecutable": "anchor",
+                            "CFBundleName": "AppFlash Anchor Fixture",
+                            "CFBundlePackageType": "APPL",
+                        }, stream)
+                    anchor = subprocess.Popen([str(anchor_executable), "--windows"],
+                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(0.3)
             helper = subprocess.Popen([str(native)], stdin=subprocess.PIPE,
                                       stdout=subprocess.PIPE, text=True, bufsize=1)
             assert not listed(helper, fixture.resolve())
+            if fullscreen:
+                # Establish an ordinary destination Space before creating the
+                # source windows. Do not query the source AX graph here: the
+                # cold-fullscreen case must still query it for the first time
+                # only after windowDidEnterFullScreen.
+                deadline = time.monotonic() + 8
+                while True:
+                    reply = request(helper, {"command": "snapshot", "path": str(destination.resolve())})
+                    if reply.get("data", {}).get("windows"):
+                        break
+                    assert time.monotonic() < deadline, reply
+                    time.sleep(0.05)
+                assert request(helper, {"command": "activate", "id": reply["data"]["windows"][0]["id"]}) == {"data": True}
+                while True:
+                    try:
+                        actual = json.loads((root / "departure-state.json").read_text())
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        actual = {}
+                    if actual.get("launched") and actual.get("active") and len(actual["windows"]) == 2 and any(
+                            w["key"] and w["on_active_space"] and not w["fullscreen"]
+                            for w in actual["windows"]):
+                        break
+                    assert time.monotonic() < deadline, actual
+                    time.sleep(0.05)
             arguments = [str(executable)] + (["--windows"] if control_windows else [])
             environment = dict(os.environ)
+            if fullscreen_keyboard:
+                environment["APPFLASH_TEXT_FOCUS"] = "1"
             if rebuild_focus_root:
                 environment["APPFLASH_REBUILD_FOCUS_ROOT"] = "1"
             if control_windows:
                 environment["APPFLASH_FIXTURE_STATE"] = str(root / "fixture-state.json")
             application = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
-                                           stderr=subprocess.DEVNULL, env=environment)
+                                           stderr=(root / "source.stderr").open("w"), env=environment)
             wait_listed(helper, fixture.resolve(), True)
             if control_windows:
                 if fullscreen_keyboard:
@@ -575,6 +699,7 @@ if let statePath = statePath {
             stop(application)
             stop(helper)
             stop(departure)
+            stop(anchor)
 
 
 if __name__ == "__main__":
