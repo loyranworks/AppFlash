@@ -11,7 +11,7 @@
 - [x] Integrate enable_available into initial startup/resume; pause and save use tracked successful keys, unreadable config remains protected.
 - [x] Preserve error visibility/clearing in UI and add English translations and regression coverage.
 - [x] Run all JavaScript and Rust tests, format/type/build checks appropriate to the patch; review the exact diff.
-- [ ] Commit and provide a reviewable patch. Do not present a source fix as installed on remote Windows machines.
+- [x] Commit and provide a reviewable patch. Do not present a source fix as installed on remote Windows machines.
 
 ## Verification boundaries
 
@@ -23,3 +23,6 @@ Mini recovery is user-confirmed. The Windows startup failure is provided by user
 - UI warning/clearing and all-blocked pause behavior covered; production callback extraction tests compile both platform selections and reject unavailable keys before admission.
 - First full run exposed an incomplete input callback fixture (registered field missing); fixture corrected and expanded, then all 92 Rust tests passed. All 62 JavaScript tests passed, including fixed certificate/signature tests; formatter and release configuration checks passed.
 - Candidate version 0.1.18; installed Mini remains signed 0.1.17 and is user-confirmed working. No release tag or remote installation is included.
+
+- Final candidate source check: cargo check --locked and formatting passed; final full run again passed all 62 JavaScript and 92 Rust tests after the version update.
+- Reviewable draft: https://github.com/loyranworks/AppFlash/pull/1 (base main 61fea223; code commit 44642c3). Main and client release remain 0.1.17; no v0.1.18 tag was pushed.
