@@ -87,3 +87,15 @@ test('partial registration warning translates guidance while preserving key and 
     assert.doesNotMatch(blocked, /[\u4e00-\u9fff]/);
   } finally { setLanguage('zh-CN'); }
 });
+
+
+test('OS conflict reports retain the target and key without inventing the external owner', () => {
+  setLanguage('en');
+  try {
+    const result=errorText('AppFlash → Firefox [Alt+F] 与系统中已注册的同组合键冲突；占用程序未知（系统未提供名称）。系统详情：HotKey already registered: Alt+KeyF');
+    assert.match(result,/Firefox \[Alt\+F\]/);
+    assert.match(result,/owning program is unknown/);
+    assert.match(result,/HotKey already registered/);
+    assert.doesNotMatch(result,/[\u4e00-\u9fff]/);
+  } finally { setLanguage('zh-CN'); }
+});

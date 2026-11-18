@@ -57,16 +57,26 @@ pub struct Status {
     pub notice: Option<crate::overlay_notice::Notice>,
 }
 
-struct NativeRegistry<'a>(&'a AppHandle);
+struct NativeRegistry<'a> {
+    app: &'a AppHandle,
+    current: &'a Config,
+    proposed: &'a Config,
+}
 impl Registry for NativeRegistry<'_> {
+    fn describe(&self, key: &str) -> String {
+        self.proposed
+            .describe_shortcut(key)
+            .or_else(|| self.current.describe_shortcut(key))
+            .unwrap_or_else(|| format!("快捷键 {key}"))
+    }
     fn register(&self, key: &str) -> Result<(), String> {
-        self.0
+        self.app
             .global_shortcut()
             .register(key)
             .map_err(|error| error.to_string())
     }
     fn unregister(&self, key: &str) -> Result<(), String> {
-        self.0
+        self.app
             .global_shortcut()
             .unregister(key)
             .map_err(|error| error.to_string())
@@ -114,9 +124,16 @@ pub fn save(app: &AppHandle, config: Config) -> Result<Status, String> {
         } else {
             config.shortcuts().into_iter().map(|item| item.0).collect()
         };
-        bindings::transition(&data.registered, &keys, &NativeRegistry(app), || {
-            config::write(&runtime.config_path, &config)
-        })?;
+        bindings::transition(
+            &data.registered,
+            &keys,
+            &NativeRegistry {
+                app,
+                current: &data.config,
+                proposed: &config,
+            },
+            || config::write(&runtime.config_path, &config),
+        )?;
         data.config = config.clone();
         data.registered = keys;
         data.startup_error = None;
@@ -140,7 +157,16 @@ pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
     let result: Result<(bool, Option<String>), String> = (|| {
         let mut data = runtime.data.lock().unwrap();
         if paused {
-            bindings::transition(&data.registered, &[], &NativeRegistry(app), || Ok(()))?;
+            bindings::transition(
+                &data.registered,
+                &[],
+                &NativeRegistry {
+                    app,
+                    current: &data.config,
+                    proposed: &data.config,
+                },
+                || Ok(()),
+            )?;
             data.registered.clear();
             data.paused = true;
             if !data.unreadable {
@@ -156,7 +182,15 @@ pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
                 .into_iter()
                 .map(|item| item.0)
                 .collect::<Vec<_>>();
-            let enabled = bindings::enable_available(&data.registered, &keys, &NativeRegistry(app));
+            let enabled = bindings::enable_available(
+                &data.registered,
+                &keys,
+                &NativeRegistry {
+                    app,
+                    current: &data.config,
+                    proposed: &data.config,
+                },
+            );
             data.paused = enabled.paused();
             data.startup_error = enabled.warning();
             data.registered = enabled.registered;

@@ -149,3 +149,83 @@ fn settings_save_failure_preserves_working_subset_from_partial_startup() {
         BTreeSet::from(["Alt+KeyG".into()])
     );
 }
+
+struct SystemConflict {
+    owned: RefCell<BTreeSet<String>>,
+    blocked: String,
+}
+impl Registry for SystemConflict {
+    fn describe(&self, key: &str) -> String {
+        format!("AppFlash → Target [{key}]")
+    }
+    fn register(&self, key: &str) -> Result<(), String> {
+        if key == self.blocked {
+            return Err(format!("HotKey already registered: {key}"));
+        }
+        self.owned.borrow_mut().insert(key.into());
+        Ok(())
+    }
+    fn unregister(&self, key: &str) -> Result<(), String> {
+        self.owned.borrow_mut().remove(key);
+        Ok(())
+    }
+}
+
+#[test]
+fn every_modifier_combination_and_letter_retains_other_keys_and_reports_unknown_owner() {
+    let mods = ["Control", "Alt", "Shift", "Super"];
+    for mask in 1..16 {
+        let prefix = mods
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, m)| *m)
+            .collect::<Vec<_>>()
+            .join("+");
+        for letter in b'A'..=b'Z' {
+            let blocked = format!("{prefix}+Key{}", letter as char);
+            let available = format!("{prefix}+Key{}", if letter == b'Z' { 'A' } else { 'Z' });
+            let registry = SystemConflict {
+                owned: RefCell::new(BTreeSet::new()),
+                blocked: blocked.clone(),
+            };
+            let result =
+                bindings::enable_available(&[], &[blocked.clone(), available.clone()], &registry);
+            assert_eq!(result.registered, vec![available]);
+            let message = result.warning().unwrap();
+            assert!(message.contains(&blocked));
+            assert!(message.contains("占用程序未知"), "{message}");
+            assert!(message.contains("AppFlash → Target"));
+        }
+    }
+}
+
+#[test]
+fn multiple_system_conflicts_are_all_reported_instead_of_only_the_first() {
+    struct Several;
+    impl Registry for Several {
+        fn register(&self, key: &str) -> Result<(), String> {
+            if key == "Alt+KeyG" {
+                Ok(())
+            } else {
+                Err(format!("HotKey already registered: {key}"))
+            }
+        }
+        fn unregister(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn describe(&self, key: &str) -> String {
+            format!("AppFlash → Target [{key}]")
+        }
+    }
+    let outcome = bindings::enable_available(
+        &[],
+        &["Alt+KeyA".into(), "Alt+KeyF".into(), "Alt+KeyG".into()],
+        &Several,
+    );
+    assert_eq!(outcome.registered, vec!["Alt+KeyG"]);
+    let warning = outcome.warning().unwrap();
+    assert!(warning.contains("Alt+KeyA"));
+    assert!(warning.contains("Alt+KeyF"));
+    assert_eq!(warning.matches("占用程序未知").count(), 2);
+}

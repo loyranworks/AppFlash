@@ -189,3 +189,21 @@ fn accepts_only_integer_scale_percentages_between_fifty_and_one_fifty() {
         assert!(!valid, "must reject {scale}");
     }
 }
+
+#[test]
+fn registration_description_names_the_configured_target_and_combo_without_rewriting_config() {
+    let mut config = Config::default();
+    let mut target = entry("Z");
+    target.name = "Firefox".into();
+    config.apps = vec![target];
+    let original = serde_json::to_value(&config).unwrap();
+    let description = config.describe_shortcut("Alt+KeyZ").unwrap();
+    assert!(description.contains("Firefox"));
+    assert!(description.contains(if cfg!(target_os = "macos") {
+        "Option+Z"
+    } else {
+        "Alt+Z"
+    }));
+    assert!(config.describe_shortcut("Alt+KeyF").is_none());
+    assert_eq!(serde_json::to_value(&config).unwrap(), original);
+}

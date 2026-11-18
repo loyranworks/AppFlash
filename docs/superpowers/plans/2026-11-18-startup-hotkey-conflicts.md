@@ -26,3 +26,13 @@ Mini recovery is user-confirmed. The Windows startup failure is provided by user
 
 - Final candidate source check: cargo check --locked and formatting passed; final full run again passed all 62 JavaScript and 92 Rust tests after the version update.
 - Reviewable draft: https://github.com/loyranworks/AppFlash/pull/1 (base main 61fea223; code commit 44642c3). Main and client release remain 0.1.17; no v0.1.18 tag was pushed.
+
+## Conflict-detail follow-up
+
+- User clarified that there are no duplicate assignments in AppFlash. No internal-duplicate flow, configuration reset/deletion, or automatic rebind was added. One Windows AppFlash process was reported.
+- After exiting AppFlash, the user's separate RegisterHotKey probe still returned Win32 1409. This demonstrates a system-level registration outside the exited application; the owning program is still unknown.
+- Diagnostics now label the configured AppFlash target and display combination on registration, release, and rollback errors. An explicit AlreadyRegistered result reports an external owner as unknown; other errors remain generic registration failures.
+- Added exhaustive pure registration coverage for 15 nonempty modifier combinations × 26 letters (390 cases), multiple simultaneous conflicts, actual configuration label lookup without mutation, and English diagnostics.
+- Latest full run: 63 JavaScript and 95 Rust tests passed, including fixed-signature/update checks.
+
+Resolution: user identified a separate self-authored shortcut utility launching at login and competing for Alt+F. Configuration files were not reset/deleted. The protection and contextual diagnostics remain a draft patch; no new release or remote installation was requested/performed.
