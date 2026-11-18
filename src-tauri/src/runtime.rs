@@ -137,28 +137,47 @@ pub fn pause(app: &AppHandle, paused: bool) -> Result<Status, String> {
     if runtime.changing.swap(true, Ordering::SeqCst) {
         return Err("正在更新绑定，请稍后再试".into());
     }
-    let result: Result<(), String> = (|| {
+    let result: Result<(bool, Option<String>), String> = (|| {
         let mut data = runtime.data.lock().unwrap();
-        let keys = if paused {
-            Vec::new()
+        if paused {
+            bindings::transition(&data.registered, &[], &NativeRegistry(app), || Ok(()))?;
+            data.registered.clear();
+            data.paused = true;
+            if !data.unreadable {
+                data.startup_error = None;
+            }
         } else {
-            data.config
+            if data.unreadable {
+                return Err("原配置无法读取，已禁止覆盖。请先备份并修复配置文件".into());
+            }
+            let keys = data
+                .config
                 .shortcuts()
                 .into_iter()
                 .map(|item| item.0)
-                .collect()
-        };
-        bindings::transition(&data.registered, &keys, &NativeRegistry(app), || Ok(()))?;
-        data.registered = keys;
-        data.paused = paused;
-        Ok(())
+                .collect::<Vec<_>>();
+            let enabled = bindings::enable_available(&data.registered, &keys, &NativeRegistry(app));
+            data.paused = enabled.paused();
+            data.startup_error = enabled.warning();
+            data.registered = enabled.registered;
+        }
+        Ok((data.paused, data.startup_error.clone()))
     })();
     runtime.changing.store(false, Ordering::SeqCst);
-    result?;
+    let (actual_paused, warning) = result?;
     if let Some(window) = app.get_webview_window("overlay") {
         let _ = window.hide();
     }
-    let _ = app.emit("paused-changed", paused);
+    if let Some(warning) = &warning {
+        runtime
+            .notices
+            .lock()
+            .unwrap()
+            .show(warning, Instant::now());
+        crate::diagnostics::record("bindings.warning", warning);
+    }
+    let _ = app.emit("app-error", warning.unwrap_or_default());
+    let _ = app.emit("paused-changed", actual_paused);
     crate::refresh_icon(app);
     Ok(status(&runtime))
 }
@@ -173,9 +192,11 @@ pub fn hotkey(app: &AppHandle, id: u32, pressed: bool) {
         return;
     }
     if let Some((_, app_id)) = data.config.shortcuts().into_iter().find(|(key, _)| {
-        key.parse::<Shortcut>()
-            .map(|key| key.id() == id)
-            .unwrap_or(false)
+        data.registered.contains(key)
+            && key
+                .parse::<Shortcut>()
+                .map(|key| key.id() == id)
+                .unwrap_or(false)
     }) {
         if runtime.settings.blocks_key(
             pressed,

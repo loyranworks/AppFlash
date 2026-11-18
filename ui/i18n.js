@@ -72,6 +72,10 @@ export const english = {
 };
 
 const nativeErrors = {
+  '所有已配置的快捷键均注册失败，快捷切换已暂停。': 'All configured shortcuts failed to register. Switching is paused. ',
+  '部分快捷键未能注册；': 'Some shortcuts could not be registered; ',
+  ' 个可用快捷键仍可切换。': ' working shortcuts remain available. ',
+  '请关闭占用程序或修改 Prefix / 字母后保存。': 'Close the app using the shortcut, or change the prefix / letter and save. ',
   '此窗口不能导出日志。': 'This window cannot export logs.',
   '无法读取导出位置：': 'Cannot read export location: ',
   '无法生成导出文件名：': 'Cannot create export file name: ',

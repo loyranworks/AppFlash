@@ -42,7 +42,7 @@ async function harness(initial = {}, platform = 'macos') {
   node('letter-color').type = 'color';
   let saved = structuredClone(config);
   let paused = false;
-  const controls = { save: null, report: null };
+  const controls = { save: null, report: null, pause: null };
   const calls = [];
   const events = new Map();
   const document = {
@@ -63,7 +63,7 @@ async function harness(initial = {}, platform = 'macos') {
     if (command === 'set_settings_dirty') { if (controls.report) await controls.report(args); return; }
     if (command === 'save_config') { if (controls.save) await controls.save(args); saved = structuredClone(args.config); return status(); }
     if (command === 'set_language') { saved.language = args.language; return; }
-    if (command === 'set_paused') { paused = args.paused; return status(); }
+    if (command === 'set_paused') { if (controls.pause) return controls.pause(args); paused = args.paused; return status(); }
     if (command === 'get_autostart') return false;
     if (command === 'list_running') return [{ id: 'safari', name: 'Safari', path: '/Applications/Safari.app', letter: '' }];
     throw new Error(`Unexpected IPC command ${command}`);
@@ -245,4 +245,29 @@ test('tray pause feedback uses the saved interface language', async () => {
   assert.equal(h.node('save-status').textContent, 'Switching paused');
   h.events.get('paused-changed')({ payload: false });
   assert.equal(h.node('save-status').textContent, 'Settings saved · shortcuts ready to use');
+});
+
+
+test('resume displays the available subset warning and clears it when paused', async () => {
+  const h = await harness({}, 'windows');
+  h.events.get('paused-changed')({ payload: true });
+  h.controls.pause = async () => ({ paused: false, error: 'Alt+KeyF unavailable; other shortcuts remain active' });
+  await h.node('pause').dispatch('click');
+  assert.equal(h.settings.state.paused, false);
+  assert.match(h.node('error').textContent, /Alt\+KeyF/);
+  assert.equal(h.node('pause').textContent, '暂停切换');
+  h.controls.pause = async () => ({ paused: true, error: null });
+  await h.node('pause').dispatch('click');
+  assert.equal(h.node('error').textContent, '');
+});
+
+test('resume with every key blocked stays paused and keeps the error visible', async () => {
+  const h = await harness({}, 'windows');
+  h.events.get('paused-changed')({ payload: true });
+  h.controls.pause = async () => ({ paused: true, error: 'Alt+KeyF unavailable' });
+  await h.node('pause').dispatch('click');
+  assert.equal(h.settings.state.paused, true);
+  assert.equal(h.node('pause').textContent, '恢复切换');
+  assert.match(h.node('error').textContent, /Alt\+KeyF/);
+  assert.equal(h.node('save-status').textContent, '快捷切换已暂停');
 });
