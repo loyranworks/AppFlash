@@ -54,11 +54,11 @@ struct Runtime {
     data: Mutex<Data>, changing: AtomicBool, settings: Settings,
     input_gate: gate::Gate, notices: Mutex<()>, sender: Sender<KeyEvent>,
 }
-struct Data { paused: bool, config: Config }
+struct Data { paused: bool, config: Config, registered: Vec<String> }
 struct Config;
 impl Config {
     fn shortcuts(&self) -> Vec<(String, String)> {
-        vec![("Control+KeyA".into(), "owned-fixture".into())]
+        vec![("Control+KeyA".into(), "owned-fixture".into()), ("Control+KeyB".into(), "unavailable-fixture".into())]
     }
 }
 struct Settings(AtomicBool);
@@ -67,18 +67,18 @@ impl Settings {
         self.0.load(Ordering::SeqCst)
     }
 }
-struct Shortcut;
+struct Shortcut(u32);
 impl std::str::FromStr for Shortcut {
     type Err = ();
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value == "Control+KeyA" { Ok(Self) } else { Err(()) }
+        match value { "Control+KeyA" => Ok(Self(7)), "Control+KeyB" => Ok(Self(8)), _ => Err(()) }
     }
 }
-impl Shortcut { fn id(&self) -> u32 { 7 } }
+impl Shortcut { fn id(&self) -> u32 { self.0 } }
 fn app() -> (AppHandle, mpsc::Receiver<KeyEvent>) {
     let (sender, receiver) = mpsc::channel();
     (AppHandle(Arc::new(Runtime {
-        data: Mutex::new(Data { paused: false, config: Config }),
+        data: Mutex::new(Data { paused: false, config: Config, registered: vec!["Control+KeyA".into()] }),
         changing: AtomicBool::new(false), settings: Settings(AtomicBool::new(false)),
         input_gate: gate::Gate::default(), notices: Mutex::new(()), sender,
     })), receiver)
@@ -107,6 +107,14 @@ fn slow_or_queued_switch_drops_presses_and_never_replays_them() {
     assert!(receiver.try_recv().is_err(), "Rejected presses must not replay");
     hotkey(&app, 7, true);
     assert!(receiver.try_recv().is_ok(), "A fresh press after completion works");
+}
+#[test]
+fn unavailable_configured_key_never_enters_the_switch_queue() {
+    let (app, receiver) = app();
+    hotkey(&app, 8, true);
+    hotkey(&app, 8, false);
+    assert!(receiver.try_recv().is_err());
+    assert!(app.0.input_gate.try_begin().is_some(), "Ignored keys do not consume admission");
 }
 #[test]
 fn rejected_state_and_failed_delivery_do_not_leak_the_permit() {

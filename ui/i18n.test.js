@@ -72,3 +72,30 @@ test('native log export failures translate the action while preserving operating
     ]) assert.equal(errorText(source), expected);
   } finally { setLanguage('zh-CN'); }
 });
+
+
+test('partial registration warning translates guidance while preserving key and working count', () => {
+  setLanguage('en');
+  try {
+    const result=errorText('部分快捷键未能注册；2 个可用快捷键仍可切换。请关闭占用程序或修改 Prefix / 字母后保存。快捷键 Alt+KeyF 注册失败：HotKey already registered');
+    assert.match(result, /2 working shortcuts remain available/);
+    assert.match(result, /Alt\+KeyF/);
+    assert.match(result, /registration failed/);
+    assert.doesNotMatch(result, /[\u4e00-\u9fff]/);
+    const blocked=errorText('所有已配置的快捷键均注册失败，快捷切换已暂停。请关闭占用程序或修改 Prefix / 字母后保存。');
+    assert.match(blocked, /Switching is paused/);
+    assert.doesNotMatch(blocked, /[\u4e00-\u9fff]/);
+  } finally { setLanguage('zh-CN'); }
+});
+
+
+test('OS conflict reports retain the target and key without inventing the external owner', () => {
+  setLanguage('en');
+  try {
+    const result=errorText('AppFlash → Firefox [Alt+F] 与系统中已注册的同组合键冲突；占用程序未知（系统未提供名称）。系统详情：HotKey already registered: Alt+KeyF');
+    assert.match(result,/Firefox \[Alt\+F\]/);
+    assert.match(result,/owning program is unknown/);
+    assert.match(result,/HotKey already registered/);
+    assert.doesNotMatch(result,/[\u4e00-\u9fff]/);
+  } finally { setLanguage('zh-CN'); }
+});

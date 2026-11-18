@@ -72,6 +72,16 @@ export const english = {
 };
 
 const nativeErrors = {
+  '请查看下方原因，处理后重试，或修改 Prefix / 字母后保存。': 'Review the reasons below and retry, or change the prefix / letter and save. ',
+  ' 与系统中已注册的同组合键冲突；': ' conflicts with an already registered system-wide shortcut; ',
+  '占用程序未知（系统未提供名称）。': 'the owning program is unknown (the system did not provide its name). ',
+  '系统详情：': 'System details: ',
+  '回滚释放失败': 'rollback could not release the binding',
+  '回滚恢复失败': 'rollback could not restore the binding',
+  '所有已配置的快捷键均注册失败，快捷切换已暂停。': 'All configured shortcuts failed to register. Switching is paused. ',
+  '部分快捷键未能注册；': 'Some shortcuts could not be registered; ',
+  ' 个可用快捷键仍可切换。': ' working shortcuts remain available. ',
+  '请关闭占用程序或修改 Prefix / 字母后保存。': 'Close the app using the shortcut, or change the prefix / letter and save. ',
   '此窗口不能导出日志。': 'This window cannot export logs.',
   '无法读取导出位置：': 'Cannot read export location: ',
   '无法生成导出文件名：': 'Cannot create export file name: ',

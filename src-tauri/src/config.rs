@@ -153,6 +153,26 @@ impl Config {
         Ok(())
     }
 
+    pub fn describe_shortcut(&self, key: &str) -> Option<String> {
+        let (_, id) = self
+            .shortcuts()
+            .into_iter()
+            .find(|(candidate, _)| candidate == key)?;
+        let app = self.apps.iter().find(|app| app.id == id)?;
+        let display = key
+            .split('+')
+            .map(|part| match part {
+                "Alt" if cfg!(target_os = "macos") => "Option",
+                "Super" if cfg!(target_os = "macos") => "Command",
+                "Super" => "Win",
+                "Control" if cfg!(target_os = "windows") => "Ctrl",
+                other => other.strip_prefix("Key").unwrap_or(other),
+            })
+            .collect::<Vec<_>>()
+            .join("+");
+        Some(format!("AppFlash → {} [{display}]", app.name))
+    }
+
     pub fn shortcuts(&self) -> Vec<(String, String)> {
         let mut prefix = self.prefix.clone();
         prefix.sort();

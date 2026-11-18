@@ -236,7 +236,7 @@ byId('cancel-confirm').addEventListener('click', () => { pendingSave = undefined
 byId('accept-confirm').addEventListener('click', () => { const config = pendingSave; pendingSave = undefined; byId('confirm-dialog').close(); if (config) return save(config); });
 byId('pause').addEventListener('click', async () => {
   byId('pause').disabled = true;
-  try { const next = await invoke('set_paused', { paused: !state.paused }); state.paused = next.paused; message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme(); if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '快捷切换已恢复'); }
+  try { const next = await invoke('set_paused', { paused: !state.paused }); state.paused = next.paused; state.error = next.error ?? null; showError(state.error ?? ''); message(byId('pause'), state.paused ? '恢复切换' : '暂停切换'); updateTheme(); if (!dirty) message(byId('save-status'), state.paused ? '快捷切换已暂停' : '快捷切换已恢复'); }
   catch (error) { showError(error); }
   finally { byId('pause').disabled = false; }
 });
